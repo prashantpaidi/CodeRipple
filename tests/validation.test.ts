@@ -51,6 +51,8 @@ describe('graph integrity validation', () => {
       from: 'a.ts::ghost',
       to: 'a.ts::f',
     });
+    // Keep metadata consistent so only the endpoint check can fail the graph.
+    graph.metadata.resolvedCalls = 2;
 
     expect(codeGraphSchema.safeParse(graph).success).toBe(false);
   });
@@ -65,6 +67,8 @@ describe('graph integrity validation', () => {
       startLine: 1,
       endLine: 1,
     });
+    // Keep metadata consistent so only the duplicate-ID check can fail the graph.
+    graph.metadata.functions = 2;
 
     expect(codeGraphSchema.safeParse(graph).success).toBe(false);
   });

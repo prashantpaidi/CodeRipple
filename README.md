@@ -43,8 +43,9 @@ identifiable calls, and writes a deterministic JSON graph.
 | `FUNCTION` | A top-level function or function-valued variable                 | `src/utils/token.ts::generateToken`         |
 
 Member IDs are qualified so declarations that share a name stay distinct:
-`UserRepository.save` (instance method), `Factory.static:build` (static
-method), and `Temperature.get:value` / `Temperature.set:value` (accessors).
+`UserRepository.save` (instance method), `Factory.static:build` (static method),
+and accessors — `Temperature.get:value` / `Temperature.set:value` (instance)
+and `Temperature.static:get:value` / `Temperature.static:set:value` (static).
 
 **Edges**
 
@@ -72,8 +73,8 @@ top-level call is never dropped silently.
 
 **Symbol identity and overloads**
 
-- Getter/setter pairs, static vs. instance members, and same-named symbols in
-  different files always become distinct nodes.
+- Getter/setter pairs (instance and static), static vs. instance methods, and
+  same-named symbols in different files always become distinct nodes.
 - An overloaded function or method collapses into a single logical node: its
   line range spans the first signature through the implementation, and every
   signature resolves to that node.

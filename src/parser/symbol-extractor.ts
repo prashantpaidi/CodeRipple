@@ -81,10 +81,18 @@ function qualifiedMemberName(member: Node): MemberName | null {
       : { name, qualifiedName: name };
   }
   if (Node.isGetAccessorDeclaration(member)) {
-    return { name: member.getName(), qualifiedName: `get:${member.getName()}` };
+    const name = member.getName();
+    return {
+      name,
+      qualifiedName: member.isStatic() ? `static:get:${name}` : `get:${name}`,
+    };
   }
   if (Node.isSetAccessorDeclaration(member)) {
-    return { name: member.getName(), qualifiedName: `set:${member.getName()}` };
+    const name = member.getName();
+    return {
+      name,
+      qualifiedName: member.isStatic() ? `static:set:${name}` : `set:${name}`,
+    };
   }
   if (Node.isPropertyDeclaration(member)) {
     const initializer = member.getInitializer();
