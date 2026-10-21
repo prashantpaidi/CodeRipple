@@ -56,10 +56,10 @@ describe('symbol extraction', () => {
     expect(idsOfType(graph.nodes, 'METHOD')).toEqual([
       'src/shapes.ts::Rectangle.area',
       'src/shapes.ts::Rectangle.constructor',
-      'src/shapes.ts::Rectangle.create',
       'src/shapes.ts::Rectangle.describe',
+      'src/shapes.ts::Rectangle.get:perimeter',
       'src/shapes.ts::Rectangle.multiply',
-      'src/shapes.ts::Rectangle.perimeter',
+      'src/shapes.ts::Rectangle.static:create',
     ]);
 
     const method = nodeById(graph, 'src/shapes.ts::Rectangle.area');

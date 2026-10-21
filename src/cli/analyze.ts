@@ -33,13 +33,16 @@ export function analyzeRepository(
   const graph = buildGraph(config, parsed);
 
   let outputPath: string | null = null;
-  if (options.output) {
+  if (options.output !== undefined) {
+    if (options.output === '') {
+      throw new Error('Output path must not be empty');
+    }
     outputPath = path.resolve(options.output);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, serializeGraph(graph), 'utf8');
   }
 
-  return { graph, outputPath, };
+  return { graph, outputPath };
 }
 
 /** Serialize a graph to deterministic, pretty-printed JSON with a trailing newline. */

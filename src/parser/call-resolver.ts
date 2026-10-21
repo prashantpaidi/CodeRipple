@@ -6,7 +6,7 @@ import {
   type TypeChecker,
 } from 'ts-morph';
 
-import { edgeId } from '../graph/ids.js';
+import { edgeId, fileNodeId } from '../graph/ids.js';
 import type {
   GraphEdge,
   UnresolvedReason,
@@ -31,6 +31,22 @@ export interface CallResolutionResult {
 function isExternalDeclaration(node: Node): boolean {
   const sourceFile = node.getSourceFile();
   return sourceFile.isDeclarationFile() || toPosixPath(sourceFile.getFilePath()).includes('/node_modules/');
+}
+
+/**
+ * True for declarations that are type-only and therefore cannot be the runtime
+ * target of a call (interface members, type aliases, ...). These do not
+ * invalidate a resolution the way an unmapped value declaration would.
+ */
+function isTypeOnlyDeclaration(node: Node): boolean {
+  return (
+    Node.isMethodSignature(node) ||
+    Node.isPropertySignature(node) ||
+    Node.isCallSignatureDeclaration(node) ||
+    Node.isConstructSignatureDeclaration(node) ||
+    Node.isInterfaceDeclaration(node) ||
+    Node.isTypeAliasDeclaration(node)
+  );
 }
 
 /** Follow import aliases to the underlying declaration symbol. */
@@ -86,12 +102,14 @@ function classifyReason(
 /**
  * Resolve the statically identifiable calls contained in a single source file.
  *
- * Every call expression that lives inside a known function or method is either
- * turned into a CALLS edge or recorded as an unresolved reference — never
- * guessed.
+ * Every call expression is attributed to its enclosing function or method, or
+ * to the FILE node when it sits in module-level executable code, and is then
+ * either turned into a CALLS edge or recorded as an unresolved reference —
+ * never guessed.
  */
 export function resolveCalls(
   sourceFile: SourceFile,
+  relativePath: string,
   context: CallResolutionContext,
 ): CallResolutionResult {
   const checker = sourceFile.getProject().getTypeChecker();
@@ -103,40 +121,46 @@ export function resolveCalls(
   for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expression = call.getExpression();
 
-    // `import("...")` is a dynamic import, which is explicitly out of scope.
+    // Dynamic `import("...")` is explicitly out of scope for PR #1.
     if (expression.getKind() === SyntaxKind.ImportKeyword) {
       continue;
     }
 
-    const caller = call.getFirstAncestor((ancestor) =>
+    // Module-level code has no function/method to attribute to, so the FILE
+    // node becomes the caller. This keeps top-level calls (and their failures)
+    // in the graph instead of dropping them silently.
+    const enclosing = call.getFirstAncestor((ancestor) =>
       context.declarationToNodeId.has(ancestor),
     );
-    const callerId = caller ? context.declarationToNodeId.get(caller) : undefined;
-    if (!callerId) {
-      continue;
-    }
+    const callerId =
+      (enclosing ? context.declarationToNodeId.get(enclosing) : undefined) ??
+      fileNodeId(relativePath);
 
     const symbol = expression.getSymbol();
+    const declarations = symbol ? declarationsFor(symbol, checker) : [];
     const targetIds: string[] = [];
-    if (symbol) {
-      for (const declaration of declarationsFor(symbol, checker)) {
-        const targetId = context.declarationToNodeId.get(declaration);
-        if (targetId && !targetIds.includes(targetId)) {
+    let everyDeclarationResolvable = declarations.length > 0;
+    for (const declaration of declarations) {
+      const targetId = context.declarationToNodeId.get(declaration);
+      if (targetId) {
+        if (!targetIds.includes(targetId)) {
           targetIds.push(targetId);
         }
+      } else if (!isTypeOnlyDeclaration(declaration)) {
+        // An unmapped value declaration means we cannot be certain the call
+        // targets the single mapped candidate, so we refuse to guess.
+        everyDeclarationResolvable = false;
       }
     }
 
-    if (targetIds.length === 1) {
-      const targetId = targetIds[0];
-      if (targetId) {
-        const id = edgeId('CALLS', callerId, targetId);
-        if (!seenEdges.has(id)) {
-          seenEdges.add(id);
-          edges.push({ id, type: 'CALLS', from: callerId, to: targetId });
-        }
-        continue;
+    const targetId = targetIds[0];
+    if (everyDeclarationResolvable && targetIds.length === 1 && targetId) {
+      const id = edgeId('CALLS', callerId, targetId);
+      if (!seenEdges.has(id)) {
+        seenEdges.add(id);
+        edges.push({ id, type: 'CALLS', from: callerId, to: targetId });
       }
+      continue;
     }
 
     const reason: UnresolvedReason =

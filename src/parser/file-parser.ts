@@ -14,9 +14,11 @@ export interface ParsedRepository {
  *
  * When a `tsconfig.json` exists we load its compiler options so that module
  * resolution (including `paths` aliases) behaves exactly like the project
- * would. We always add files ourselves (via `skipAddingFilesFromTsConfig`) so
- * that repository discovery — including `.gitignore` and ignored directories —
- * remains the single source of truth for what gets analyzed.
+ * would. We always add files ourselves (via `skipAddingFilesFromTsConfig`), so
+ * repository discovery — including `.gitignore` and ignored directories —
+ * decides which files become graph nodes. ts-morph may still load other files
+ * that are reached through imports in order to resolve types; those are never
+ * emitted as nodes.
  */
 export function parseRepository(
   config: RepositoryConfig,

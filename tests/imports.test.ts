@@ -29,8 +29,17 @@ describe('import resolution', () => {
 
   it('does not create nodes for external npm packages', () => {
     const graph = analyzeFixture('calls-project');
-    const fileNodes = graph.nodes.filter((node) => node.type === 'FILE');
+    const fileIds = graph.nodes
+      .filter((node) => node.type === 'FILE')
+      .map((node) => node.id)
+      .sort();
 
-    expect(fileNodes.every((node) => !node.id.includes('node_modules'))).toBe(true);
+    // `node:fs` is imported by src/dynamic.ts but must not appear as a node.
+    expect(fileIds).toEqual([
+      'src/calculator.ts',
+      'src/dynamic.ts',
+      'src/main.ts',
+      'src/math.ts',
+    ]);
   });
 });

@@ -20,14 +20,30 @@ export function functionNodeId(relativePath: string, functionName: string): stri
   return `${relativePath}::${functionName}`;
 }
 
-export function methodNodeId(
+/**
+ * Build a METHOD node ID from an already-qualified member name.
+ *
+ * The qualifier keeps declarations that share a name distinct, e.g.
+ * `value` (instance method), `static:value`, `get:value`, and `set:value`.
+ * See `qualifiedMemberName` in the symbol extractor.
+ */
+export function memberNodeId(
   relativePath: string,
   className: string,
-  methodName: string,
+  qualifiedMemberName: string,
 ): string {
-  return `${relativePath}::${className}.${methodName}`;
+  return `${relativePath}::${className}.${qualifiedMemberName}`;
+}
+
+/**
+ * Escape endpoint IDs so that the `->` delimiter can never appear inside a
+ * component. This keeps `edgeId` injective: two distinct edges always produce
+ * two distinct IDs, so deduplication can never drop a real relationship.
+ */
+function encodeEdgePart(value: string): string {
+  return value.replace(/%/g, '%25').replace(/->/g, '%2D%3E');
 }
 
 export function edgeId(type: EdgeType, from: string, to: string): string {
-  return `${type}:${from}->${to}`;
+  return `${type}:${encodeEdgePart(from)}->${encodeEdgePart(to)}`;
 }

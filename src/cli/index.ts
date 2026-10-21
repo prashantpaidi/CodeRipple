@@ -39,7 +39,7 @@ function parseAnalyzeArgs(args: readonly string[]): AnalyzeArgs {
 
     if (arg === '-o' || arg === '--output') {
       const value = args[index + 1];
-      if (value === undefined) {
+      if (value === undefined || value.startsWith('-')) {
         throw new UsageError(`Missing value for ${arg}`);
       }
       output = value;

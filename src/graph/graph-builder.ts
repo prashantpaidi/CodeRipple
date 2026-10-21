@@ -56,8 +56,20 @@ export function buildGraph(
   }
 
   const nodeById = new Map<string, GraphNode>();
-  const edgeById = new Map<string, GraphEdge>();
+  const edgeByKey = new Map<string, GraphEdge>();
   const declarationToNodeId = new Map<Node, string>();
+
+  // Edges are deduplicated by their (type, from, to) tuple rather than by the
+  // rendered ID, so two genuinely distinct relationships can never collapse
+  // into one another.
+  const edgeKey = (edge: GraphEdge): string =>
+    `${edge.type}\u0000${edge.from}\u0000${edge.to}`;
+  const addEdge = (edge: GraphEdge): void => {
+    const key = edgeKey(edge);
+    if (!edgeByKey.has(key)) {
+      edgeByKey.set(key, edge);
+    }
+  };
 
   for (const [relativePath, sourceFile] of entries) {
     const symbols = extractSymbols(sourceFile, relativePath);
@@ -67,9 +79,7 @@ export function buildGraph(
       }
     }
     for (const edge of symbols.edges) {
-      if (!edgeById.has(edge.id)) {
-        edgeById.set(edge.id, edge);
-      }
+      addEdge(edge);
     }
     for (const [declaration, id] of symbols.declarationToNodeId) {
       declarationToNodeId.set(declaration, id);
@@ -78,25 +88,23 @@ export function buildGraph(
 
   for (const [relativePath, sourceFile] of entries) {
     for (const edge of resolveImports(sourceFile, relativePath, analyzedByAbsolutePath)) {
-      if (!edgeById.has(edge.id)) {
-        edgeById.set(edge.id, edge);
-      }
+      addEdge(edge);
     }
   }
 
   const unresolvedReferences: UnresolvedReference[] = [];
-  for (const [, sourceFile] of entries) {
-    const { edges, unresolved } = resolveCalls(sourceFile, { declarationToNodeId });
+  for (const [relativePath, sourceFile] of entries) {
+    const { edges, unresolved } = resolveCalls(sourceFile, relativePath, {
+      declarationToNodeId,
+    });
     for (const edge of edges) {
-      if (!edgeById.has(edge.id)) {
-        edgeById.set(edge.id, edge);
-      }
+      addEdge(edge);
     }
     unresolvedReferences.push(...unresolved);
   }
 
   const nodes = [...nodeById.values()].sort((a, b) => compareStrings(a.id, b.id));
-  const edges = [...edgeById.values()].sort((a, b) => compareStrings(a.id, b.id));
+  const edges = [...edgeByKey.values()].sort((a, b) => compareStrings(a.id, b.id));
   unresolvedReferences.sort(compareUnresolved);
 
   return validateCodeGraph({

@@ -19,7 +19,7 @@ describe('call resolution', () => {
     );
   });
 
-  it('resolves imported function calls, including namespace imports', () => {
+  it('resolves imported function calls', () => {
     const graph = analyzeFixture('calls-project');
 
     expect(callsEdges(graph)).toContain(
@@ -27,6 +27,15 @@ describe('call resolution', () => {
     );
     expect(callsEdges(graph)).toContain(
       'CALLS:src/calculator.ts::Calculator.squareTotal->src/math.ts::square',
+    );
+  });
+
+  it('resolves namespace import calls inside the function that imports them', () => {
+    const graph = analyzeFixture('imports-project');
+
+    // `multiply` is only reachable through `import * as math`.
+    expect(callsEdges(graph)).toContain(
+      'CALLS:src/index.ts::run->src/lib/math.ts::multiply',
     );
   });
 

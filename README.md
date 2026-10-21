@@ -35,20 +35,27 @@ identifiable calls, and writes a deterministic JSON graph.
 
 **Nodes**
 
-| Type       | Description                                              | Example ID                                |
-| ---------- | -------------------------------------------------------- | ----------------------------------------- |
-| `FILE`     | A source file                                             | `src/services/user.ts`                    |
-| `CLASS`    | A top-level class                                         | `src/services/user.ts::UserRepository`    |
-| `METHOD`   | A class method, constructor, accessor, or function field  | `src/services/user.ts::UserRepository.save` |
-| `FUNCTION` | A top-level function or function-valued const             | `src/utils/token.ts::generateToken`       |
+| Type       | Description                                                     | Example ID                                  |
+| ---------- | --------------------------------------------------------------- | ------------------------------------------- |
+| `FILE`     | A source file                                                    | `src/services/user.ts`                      |
+| `CLASS`    | A top-level class                                                | `src/services/user.ts::UserRepository`      |
+| `METHOD`   | A class member: method, constructor, accessor, or function field | `src/services/user.ts::UserRepository.save` |
+| `FUNCTION` | A top-level function or function-valued variable                 | `src/utils/token.ts::generateToken`         |
+
+Member IDs are qualified so declarations that share a name stay distinct:
+`UserRepository.save` (instance method), `Factory.static:build` (static
+method), and `Temperature.get:value` / `Temperature.set:value` (accessors).
 
 **Edges**
 
-| Type       | Shape                        |
-| ---------- | ---------------------------- |
+| Type       | Shape                                                 |
+| ---------- | ----------------------------------------------------- |
 | `CONTAINS` | `FILE -> CLASS`, `FILE -> FUNCTION`, `CLASS -> METHOD` |
-| `IMPORTS`  | `FILE -> FILE`               |
-| `CALLS`    | `FUNCTION/METHOD -> FUNCTION/METHOD` |
+| `IMPORTS`  | `FILE -> FILE`                                        |
+| `CALLS`    | `FILE/FUNCTION/METHOD -> FUNCTION/METHOD`             |
+
+`FILE` appears as a `CALLS` source for module-level executable code, so a
+top-level call is never dropped silently.
 
 **Resolution supported**
 
@@ -56,8 +63,22 @@ identifiable calls, and writes a deterministic JSON graph.
 - `tsconfig.json` `baseUrl` + `paths` aliases (e.g. `@/*` -> `src/*`).
 - Same-file function calls.
 - Imported function calls, including namespace imports (`import * as utils`).
-- `this.method()` self-calls.
-- Cross-file / cross-class calls when the receiver type is statically known.
+- `this.method()` self-calls, including inherited methods.
+- Cross-file / cross-class calls when the receiver type is statically known
+  (including optional-chained and static calls).
+- Calls at module top level, attributed to the enclosing `FILE`.
+- Calls inside callbacks and nested arrows, attributed to the nearest enclosing
+  function or method.
+
+**Symbol identity and overloads**
+
+- Getter/setter pairs, static vs. instance members, and same-named symbols in
+  different files always become distinct nodes.
+- An overloaded function or method collapses into a single logical node: its
+  line range spans the first signature through the implementation, and every
+  signature resolves to that node.
+- Nested function declarations are not modelled as separate nodes; calls to
+  them are recorded as unresolved references.
 
 **Unresolved references**
 
@@ -71,10 +92,14 @@ with a typed reason:
 | `EXTERNAL_DEPENDENCY`     | The callee resolves to a declaration outside the repository.   |
 | `AMBIGUOUS_SYMBOL`        | More than one in-repository declaration could be the target.    |
 
+A call becomes an edge only when *every* declaration of its symbol maps to a
+single in-repository node; otherwise it is recorded as unresolved.
+
 ## Architecture
 
 ```
 src/
+  index.ts              # public library entry point (barrel)
   cli/
     index.ts              # argument parsing + terminal output
     analyze.ts            # programmatic entry point + summary formatting
@@ -105,8 +130,11 @@ declaration:
 4. **Resolve imports** into `IMPORTS` edges.
 5. **Resolve calls** against the global declaration table into `CALLS` edges and
    unresolved references.
-6. **Sort** nodes and edges, compute metadata, and **validate** the graph with
-   Zod before returning/writing it.
+6. **Sort** nodes and edges, compute metadata, and **validate** the graph before
+   returning/writing it. Validation covers both shape and structural integrity:
+   unique node/edge IDs, existing edge endpoints, per-edge-type endpoint rules,
+   `METHOD` parents that are real `CLASS` nodes, unresolved callers that exist,
+   and metadata that matches the graph contents.
 
 **Design principles**
 
@@ -164,7 +192,10 @@ Calls resolved:     9
 Calls unresolved:   4
 ```
 
-## Generated graph
+## Generated graph (abridged)
+
+The snippet below is abridged for readability; a real graph contains one `FILE`
+node per analyzed file plus every extracted symbol and relationship.
 
 ```json
 {
@@ -225,17 +256,32 @@ inspect the resulting graphs, rather than mocking the AST.
 
 PR #1 intentionally does **not** attempt to resolve:
 
-- dynamic `import()`
+- dynamic `import()` (skipped entirely — not yet recorded as unresolved)
 - `eval()` and other runtime code generation
 - reflection / metaprogramming
 - runtime dependency injection and framework DI containers
 - monkey patching
-- highly dynamic property access (e.g. `obj[key]()`)
+- highly dynamic property access (e.g. `obj[key]()`) — recorded as
+  `DYNAMIC_PROPERTY_ACCESS`
 - runtime-generated functions
 - indirect runtime dependencies
-- calls made at module top level (no caller node exists for module scope)
-- functions nested inside other functions (their calls are attributed to the
-  nearest enclosing function or method)
+- constructor invocations (`new Foo(...)`) — not yet modelled as `CALLS` edges
+- CommonJS `require('./x')` / `import x = require('./x')` module references
+- functions nested inside other functions: they are not separate nodes, so calls
+  *to* them are recorded as unresolved references, while calls *inside* them are
+  attributed to the nearest enclosing function or method
+- a `.js` module that has a sibling `.d.ts` companion file: module resolution may
+  return the excluded declaration file, dropping the `IMPORTS` edge to the `.js`
+
+Discovery-related limitations:
+
+- Only the repository-root `.gitignore` is honored; nested `.gitignore` files are
+  not considered.
+- Only a root `tsconfig.json` is read; monorepos/workspaces with multiple
+  tsconfigs are not yet supported.
+- Default ignored directory names (`node_modules`, `dist`, `build`, `coverage`,
+  `.next`, `.git`) are skipped at **any** depth, so a directory like
+  `src/build/` is not analyzed.
 
 CodeRipple prefers reporting an unresolved reference over producing an incorrect
 graph edge.

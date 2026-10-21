@@ -5,6 +5,6 @@ import * as math from './lib/math';
 export function run(): string {
   const sum = add(1, 2);
   const difference = subtract(sum, 1);
-  const extra = math.add(difference, 1);
-  return formatNumber(extra);
+  const product = math.multiply(difference, 2);
+  return formatNumber(product);
 }

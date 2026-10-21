@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { analyzeRepository, serializeGraph } from '../src/cli/analyze.js';
-import { codeGraphSchema } from '../src/graph/graph-schema.js';
+import { codeGraphSchema, validateCodeGraph } from '../src/graph/graph-schema.js';
 import { analyzeFixture, fixture, repoRoot } from './helpers.js';
 
 const tempDirs: string[] = [];
@@ -105,23 +105,24 @@ describe('analyze output', () => {
     expect(written).toEqual(result.graph);
   });
 
-  it('runs end to end through the CLI', () => {
+  it('runs end to end through the CLI and writes the same graph', () => {
     const outputPath = path.join(makeTempDir(), 'cli.json');
-    const tsxBin = path.join(repoRoot, 'node_modules', '.bin', 'tsx');
+    const cliPath = path.join(repoRoot, 'src', 'cli', 'index.ts');
 
+    // Launch through the Node binary with the tsx loader rather than a `.bin`
+    // shim, which is portable across platforms.
     const stdout = execFileSync(
-      tsxBin,
-      ['src/cli/index.ts', 'analyze', fixture('basic-project'), '--output', outputPath],
+      process.execPath,
+      ['--import', 'tsx', cliPath, 'analyze', fixture('basic-project'), '--output', outputPath],
       { cwd: repoRoot, encoding: 'utf8', timeout: 120_000 },
     );
 
     expect(stdout).toContain('CodeRipple');
     expect(stdout).toContain('Files analyzed');
-    expect(fs.existsSync(outputPath)).toBe(true);
 
-    const written = JSON.parse(fs.readFileSync(outputPath, 'utf8')) as {
-      version: string;
-    };
-    expect(written.version).toBe('1');
+    const written = validateCodeGraph(
+      JSON.parse(fs.readFileSync(outputPath, 'utf8')) as unknown,
+    );
+    expect(written).toEqual(analyzeRepository(fixture('basic-project')).graph);
   });
 });
