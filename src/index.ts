@@ -24,3 +24,41 @@ export {
   loadGitignoreMatcher,
 } from './parser/repository-parser.js';
 export type { DiscoveredFile, DiscoveryOptions } from './parser/repository-parser.js';
+
+export {
+  ConfigurationError,
+  ConnectionError,
+  GraphStoreError,
+  InvalidArgumentError,
+  PersistenceError,
+} from './storage/errors.js';
+export {
+  DEFAULT_MAX_PATHS,
+  DEFAULT_PATH_DEPTH,
+  DEFAULT_TRAVERSAL_DEPTH,
+  MAX_TRAVERSAL_DEPTH,
+} from './storage/graph-store.js';
+export type {
+  DependencyMatch,
+  DependencyResult,
+  GraphPath,
+  GraphStore,
+  PathOptions,
+  PathResult,
+  QueryOptions,
+  TraversalOptions,
+} from './storage/graph-store.js';
+export {
+  normalizeGitRemote,
+  resolveRepositoryIdentity,
+} from './storage/repository-identity.js';
+export type {
+  RepositoryIdentity,
+  RepositoryIdentityOptions,
+  RepositoryIdentitySource,
+} from './storage/repository-identity.js';
+export { loadEnvFileIfPresent, loadNeo4jConfig } from './storage/neo4j/neo4j-config.js';
+export type { Neo4jConfig } from './storage/neo4j/neo4j-config.js';
+export { createNeo4jGraphStore, Neo4jGraphStore } from './storage/neo4j/neo4j-graph-store.js';
+export { initializeSchema } from './storage/neo4j/neo4j-schema.js';
+
