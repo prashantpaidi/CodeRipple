@@ -25,7 +25,14 @@ export class InvalidArgumentError extends GraphStoreError {}
 /** Persisting or reading the graph failed inside the database. */
 export class PersistenceError extends GraphStoreError {}
 
-/** Render an unknown thrown value as a stable, single-line message. */
+/**
+ * Render an unknown thrown value as a stable, single-line message.
+ *
+ * Line breaks (including those embedded in driver/database error messages) are
+ * collapsed to spaces so CLI output stays on one line and cannot be used to
+ * inject extra log lines.
+ */
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\s*[\r\n]+\s*/g, ' ').trim();
 }

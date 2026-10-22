@@ -67,6 +67,12 @@ describe('node mapping', () => {
     expect(refOf('repo_b', 'src/x.ts')).not.toBe(refOf('repo_a', 'src/x.ts'));
   });
 
+  it('keeps refs injective when a component itself contains the separator', () => {
+    // Without escaping, both of these would render as `a::b::c`.
+    expect(refOf('a', 'b::c')).not.toBe(refOf('a::b', 'c'));
+    expect(refOf('a', 'b%c')).not.toBe(refOf('a', 'b%3A%3Ac'));
+  });
+
   it('rejects an unknown node type', () => {
     expect(() => propertiesToGraphNode({ id: 'x', type: 'WEIRD', name: 'x' })).toThrow(
       GraphStoreError,
@@ -144,9 +150,29 @@ describe('edge and path mapping', () => {
     expect(() => pathToGraphPath({ nodes: [] })).toThrow(GraphStoreError);
   });
 
+  it('rejects a path whose nodes and relationships disagree', () => {
+    expect(() =>
+      pathToGraphPath({
+        nodes: [
+          { properties: graphNodeToProperties(functionNode, repositoryId) },
+          { properties: graphNodeToProperties(secondFunctionNode, repositoryId) },
+        ],
+        relationships: [
+          { type: 'CALLS', properties: {} },
+          { type: 'CALLS', properties: {} },
+        ],
+      }),
+    ).toThrow(/nodes and relationships disagree|nodes but/);
+  });
+
   it('coerces integer values and rejects non-integers', () => {
     expect(toInteger(3)).toBe(3);
     expect(() => toInteger('3')).toThrow(GraphStoreError);
     expect(() => toInteger(undefined)).toThrow(GraphStoreError);
+  });
+
+  it('accepts the driver lossless Integer shape as well as plain numbers', () => {
+    expect(toInteger({ toNumber: () => 7 })).toBe(7);
+    expect(() => toInteger({ toNumber: () => 1.5 })).toThrow(GraphStoreError);
   });
 });

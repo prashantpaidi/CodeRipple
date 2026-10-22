@@ -24,7 +24,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await store.close();
+  await store?.close();
 });
 
 describe('re-indexing semantics', () => {

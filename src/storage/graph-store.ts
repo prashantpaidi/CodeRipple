@@ -44,7 +44,7 @@ export interface PathOptions extends TraversalOptions {
 /** A node discovered by a dependency/dependent traversal, with its distance. */
 export interface DependencyMatch {
   node: GraphNode;
-  /** Number of `CALLS` hops from the queried node (>= 1). */
+  /** Number of traversed relationship hops from the queried node (>= 1). */
   depth: number;
 }
 
@@ -146,7 +146,7 @@ export function resolveRelationshipTypes(options?: QueryOptions): EdgeType[] {
 }
 
 function assertDepth(depth: number): number {
-  if (!Number.isInteger(depth) || depth < 1 || depth > MAX_TRAVERSAL_DEPTH) {
+  if (!Number.isSafeInteger(depth) || depth < 1 || depth > MAX_TRAVERSAL_DEPTH) {
     throw new InvalidArgumentError(
       `maxDepth must be an integer between 1 and ${MAX_TRAVERSAL_DEPTH} (got ${String(depth)})`,
     );
@@ -167,9 +167,11 @@ export function resolvePathDepth(options?: PathOptions): number {
 /** Resolve the maximum number of paths to return. */
 export function resolveMaxPaths(options?: PathOptions): number {
   const maxPaths = options?.maxPaths ?? DEFAULT_MAX_PATHS;
-  if (!Number.isInteger(maxPaths) || maxPaths < 1) {
+  // `Number.isSafeInteger` (not `isInteger`): unsafe values such as `1e21` would
+  // be interpolated into `LIMIT` as `1e+21` and produce invalid Cypher.
+  if (!Number.isSafeInteger(maxPaths) || maxPaths < 1) {
     throw new InvalidArgumentError(
-      `maxPaths must be a positive integer (got ${String(maxPaths)})`,
+      `maxPaths must be a positive safe integer (got ${String(maxPaths)})`,
     );
   }
   return maxPaths;

@@ -17,9 +17,18 @@ import type { GraphPath } from '../graph-store.js';
  * escape the persistence layer.
  */
 
+/**
+ * Escape a ref component so the `::` separator can never appear inside it.
+ * Both components are escaped, which keeps {@link refOf} injective even when a
+ * repository ID (which may come from `--repository-id`) contains `::`.
+ */
+function encodeRefPart(value: string): string {
+  return value.replace(/%/g, '%25').replace(/::/g, '%3A%3A');
+}
+
 /** Namespaced identity of a node: unique across every repository. */
 export function refOf(repositoryId: string, nodeId: string): string {
-  return `${repositoryId}::${nodeId}`;
+  return `${encodeRefPart(repositoryId)}::${encodeRefPart(nodeId)}`;
 }
 
 /** Neo4j label added alongside `:CodeEntity` for each CodeRipple node type. */
@@ -213,6 +222,11 @@ export function pathToGraphPath(value: unknown): GraphPath {
   if (!isDriverPathLike(value)) {
     throw new GraphStoreError('Expected a Neo4j path record');
   }
+  if (value.nodes.length !== value.relationships.length + 1) {
+    throw new GraphStoreError(
+      `Malformed Neo4j path: ${value.nodes.length} nodes but ${value.relationships.length} relationships`,
+    );
+  }
 
   const nodes = value.nodes.map((node) => propertiesToGraphNode(node.properties));
   const edges: GraphEdge[] = [];
@@ -237,10 +251,35 @@ export function pathToGraphPath(value: unknown): GraphPath {
   return { nodes, edges };
 }
 
-/** Coerce a value from Neo4j into an integer, failing loudly otherwise. */
+interface LosslessIntegerLike {
+  toNumber(): number;
+}
+
+/** True for the driver's lossless `Integer` objects (duck-typed, no import). */
+function isLosslessInteger(value: unknown): value is LosslessIntegerLike {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { toNumber?: unknown }).toNumber === 'function'
+  );
+}
+
+/**
+ * Coerce a value from Neo4j into an integer, failing loudly otherwise.
+ *
+ * Accepts plain numbers (the shape produced by a driver created with
+ * `disableLosslessIntegers: true`) as well as the driver's lossless `Integer`
+ * objects, so a store built from a differently configured driver still works.
+ */
 export function toInteger(value: unknown): number {
   if (typeof value === 'number' && Number.isInteger(value)) {
     return value;
+  }
+  if (isLosslessInteger(value)) {
+    const numeric = value.toNumber();
+    if (Number.isInteger(numeric)) {
+      return numeric;
+    }
   }
   throw new GraphStoreError(`Expected an integer from Neo4j, received ${String(value)}`);
 }

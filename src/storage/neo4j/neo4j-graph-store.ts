@@ -166,8 +166,17 @@ function normalizeMatches(matches: readonly DependencyMatch[]): DependencyMatch[
   );
 }
 
+/**
+ * Identity of a path for deduplication.
+ *
+ * Includes the ordered edge IDs as well as the node IDs, so two paths that
+ * visit the same nodes but use different relationships (e.g. a `CALLS` hop and
+ * an `IMPORTS` hop between the same pair) are preserved rather than collapsed.
+ */
 function pathKey(path: GraphPath): string {
-  return path.nodes.map((node) => node.id).join('>');
+  const nodePart = path.nodes.map((node) => node.id).join('>');
+  const edgePart = path.edges.map((edge) => edge.id).join('>');
+  return `${nodePart}|${edgePart}`;
 }
 
 function normalizePaths(paths: readonly GraphPath[]): GraphPath[] {

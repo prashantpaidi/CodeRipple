@@ -15,7 +15,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await store.close();
+  await store?.close();
 });
 
 describe('scale sanity check', () => {

@@ -65,6 +65,10 @@ describe('normalizeGitRemote', () => {
     expect(normalizeGitRemote('   ')).toBeNull();
     expect(normalizeGitRemote('/home/me/local-repo')).toBeNull();
     expect(normalizeGitRemote('file:///home/me/repo')).toBeNull();
+    // Local filesystem remotes must not be read as `host/path`.
+    expect(normalizeGitRemote('file://server/share/repo.git')).toBeNull();
+    expect(normalizeGitRemote('C:\\repos\\app')).toBeNull();
+    expect(normalizeGitRemote('C:/repos/app')).toBeNull();
   });
 });
 

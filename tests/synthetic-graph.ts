@@ -31,6 +31,14 @@ export function syntheticGraph(
   const filePath = options.file ?? 'src/graph-fixture.ts';
   const functionId = (name: string): string => `${filePath}::${name}`;
 
+  const names = new Set<string>();
+  for (const name of functions) {
+    if (names.has(name)) {
+      throw new Error(`Duplicate function name "${name}" in synthetic graph`);
+    }
+    names.add(name);
+  }
+
   const nodes: GraphNode[] = [
     {
       id: filePath,
@@ -124,6 +132,9 @@ export function generateCalls(
   const size = names.length;
   if (size < 2) {
     return [];
+  }
+  if (new Set(names).size !== size) {
+    throw new Error('generateCalls requires unique function names');
   }
 
   const pairs: Array<readonly [string, string]> = [];

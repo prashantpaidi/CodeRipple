@@ -59,6 +59,5 @@ export type {
 } from './storage/repository-identity.js';
 export { loadEnvFileIfPresent, loadNeo4jConfig } from './storage/neo4j/neo4j-config.js';
 export type { Neo4jConfig } from './storage/neo4j/neo4j-config.js';
-export { createNeo4jGraphStore, Neo4jGraphStore } from './storage/neo4j/neo4j-graph-store.js';
-export { initializeSchema } from './storage/neo4j/neo4j-schema.js';
+export { createNeo4jGraphStore } from './storage/neo4j/neo4j-graph-store.js';
 

@@ -57,6 +57,13 @@ export function normalizeGitRemote(remote: string): string | null {
     return null;
   }
 
+  // Local filesystem remotes are not hosted repositories: a Windows drive path
+  // (`C:\repo`, `C:/repo`) or a `file:` URL must fall back to the path hash
+  // rather than being parsed as `host/path`.
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed) || /^file:/i.test(trimmed)) {
+    return null;
+  }
+
   let host: string;
   let repoPath: string;
 

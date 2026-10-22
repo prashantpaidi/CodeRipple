@@ -253,24 +253,25 @@ which edge types to traverse.
 ### Indexing
 
 ```bash
-pnpm coderipple index ./fixtures/basic-project
+pnpm coderipple index ./fixtures/graph-project
 ```
 
 ```
 CodeRipple
 
-Repository:            basic-project
+Repository:            graph-project
 Repository ID:         repo_ab12cd34ef56ab78
 Files analyzed:        3
-Nodes indexed:         15
-Edges indexed:         24
-Unresolved references: 4
+Nodes indexed:         8
+Edges indexed:         11
+Unresolved references: 1
 Database:              Neo4j
 Status:                indexed
 ```
 
 The printed **Repository ID** is what the `graph` commands take as their first
-argument.
+argument (the value above is illustrative; a real run prints the ID derived for
+your repository).
 
 ### Queries
 
@@ -309,8 +310,9 @@ Path 1 (3 hop(s)):
 - `callers` / `callees` are **direct** (one hop).
 - `dependencies` walks *downstream* (`A depends on ...`), `dependents` walks
   *upstream* (`... depends on A`).
-- Traversal depth is bounded: default `1`, maximum `5`. `LIMIT`/`SKIP`-style
-  unbounded walks are not possible.
+- Traversal depth is bounded and validated. `dependencies`/`dependents` default
+  to **1** hop; `paths` defaults to **5** hops; the maximum for all of them is
+  **5**. Unbounded walks are not possible.
 - Results are **deterministic**: nodes are sorted by ID (ties by depth), paths by
   length then node sequence, and duplicates are removed. Re-running a query
   against unchanged data yields identical output.

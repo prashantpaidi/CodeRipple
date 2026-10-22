@@ -62,12 +62,30 @@ export function loadNeo4jConfig(env: NodeJS.ProcessEnv = process.env): Neo4jConf
   return parsed.data;
 }
 
+const ENV_LINE_PATTERN = /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=.*$/;
+
+/** Line numbers (1-based) of entries that are not blank, comments, or KEY=VALUE. */
+function findInvalidEnvLines(content: string): number[] {
+  const invalid: number[] = [];
+  content.split(/\r?\n/).forEach((line, index) => {
+    const trimmedLine = line.trim();
+    if (trimmedLine === '' || trimmedLine.startsWith('#')) {
+      return;
+    }
+    if (!ENV_LINE_PATTERN.test(line)) {
+      invalid.push(index + 1);
+    }
+  });
+  return invalid;
+}
+
 /**
  * Load a `.env` file into `process.env` when one is present.
  *
  * Uses Node's built-in loader (no extra dependency); values already present in
- * the environment take precedence. A malformed `.env` surfaces as a
- * {@link ConfigurationError}.
+ * the environment take precedence. Node's loader silently skips malformed
+ * entries, so the file is syntax-checked first and a malformed file surfaces as
+ * a {@link ConfigurationError} instead of being quietly ignored.
  */
 export function loadEnvFileIfPresent(
   filePath: string = path.resolve(process.cwd(), '.env'),
@@ -75,6 +93,25 @@ export function loadEnvFileIfPresent(
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return;
   }
+
+  let content: string;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    throw new ConfigurationError(
+      `Failed to read environment file "${filePath}": ${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+
+  const invalidLines = findInvalidEnvLines(content);
+  if (invalidLines.length > 0) {
+    const shown = invalidLines.slice(0, 5).join(', ');
+    throw new ConfigurationError(
+      `Invalid environment file "${filePath}": malformed entries on line(s) ${shown}. Expected KEY=VALUE.`,
+    );
+  }
+
   try {
     process.loadEnvFile(filePath);
   } catch (error) {
