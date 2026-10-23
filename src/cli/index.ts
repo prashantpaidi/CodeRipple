@@ -6,7 +6,9 @@ import { EDGE_TYPES, type EdgeType } from '../graph/graph-types.js';
 import { errorMessage } from '../storage/errors.js';
 import { createNeo4jGraphStore } from '../storage/neo4j/neo4j-graph-store.js';
 import { loadEnvFileIfPresent } from '../storage/neo4j/neo4j-config.js';
+import { detectChangedSymbols } from '../impact/detect-changed-symbols.js';
 import { analyzeRepository, formatSummary } from './analyze.js';
+import { formatDiffReport, formatDiffReportJson } from './diff.js';
 import {
   type DependencyQuery,
   formatDependencyResult,
@@ -22,6 +24,7 @@ Usage:
   coderipple index <repository-path> [options]
   coderipple graph <callers|callees|dependencies|dependents> <repository-id> <node-id> [options]
   coderipple graph paths <repository-id> <from-node-id> <to-node-id> [options]
+  coderipple diff <repository-path> --base <ref> --head <ref> [options]
 
 Analyze options:
   -o, --output <file>   Write the code graph JSON to <file>.
@@ -39,13 +42,19 @@ Graph options:
       --max-paths <n>       Maximum paths to return (paths query only).
       --relationships <a,b> Relationship types to traverse (default: CALLS).
 
+Diff options:
+      --base <ref>          Base revision to compare from (required).
+      --head <ref>          Head revision to compare to (required).
+      --json                Emit deterministic JSON instead of text.
+
   -h, --help            Show this help.
 
 Examples:
   coderipple analyze ./fixtures/basic-project
   coderipple index ./fixtures/basic-project
   coderipple graph callers repo_ab12cd34ef56ab78 src/controller.ts::register
-  coderipple graph dependencies repo_ab12cd34ef56ab78 src/service.ts::createUser --depth 3`;
+  coderipple graph dependencies repo_ab12cd34ef56ab78 src/service.ts::createUser --depth 3
+  coderipple diff . --base main --head HEAD`;
 
 class UsageError extends Error {}
 
@@ -97,6 +106,13 @@ interface PathArgs {
   depth?: number;
   maxPaths?: number;
   relationshipTypes?: readonly EdgeType[];
+}
+
+interface DiffArgs {
+  repository: string;
+  base: string;
+  head: string;
+  json: boolean;
 }
 
 function nextValue(args: readonly string[], index: number, option: string): string {
@@ -319,6 +335,48 @@ function parsePathArgs(args: readonly string[]): PathArgs {
   };
 }
 
+function parseDiffArgs(args: readonly string[]): DiffArgs {
+  let repository: string | undefined;
+  let base: string | undefined;
+  let head: string | undefined;
+  let json = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) {
+      continue;
+    }
+
+    if (arg === '--base') {
+      base = nextValue(args, index, arg);
+      index += 1;
+    } else if (arg === '--head') {
+      head = nextValue(args, index, arg);
+      index += 1;
+    } else if (arg === '--json') {
+      json = true;
+    } else if (arg.startsWith('-')) {
+      throw new UsageError(`Unknown option: ${arg}`);
+    } else if (repository === undefined) {
+      repository = arg;
+    } else {
+      throw new UsageError(`Unexpected argument: ${arg}`);
+    }
+  }
+
+  if (repository === undefined) {
+    throw new UsageError('Missing required <repository-path> argument');
+  }
+  if (base === undefined) {
+    throw new UsageError('Missing required --base <ref> option');
+  }
+  if (head === undefined) {
+    throw new UsageError('Missing required --head <ref> option');
+  }
+
+  return { repository, base, head, json };
+}
+
 /* ------------------------------------------------------------------ *
  * Output helpers
  * ------------------------------------------------------------------ */
@@ -485,6 +543,33 @@ async function runPathsCommand(args: readonly string[]): Promise<number> {
   }
 }
 
+async function runDiff(args: readonly string[]): Promise<number> {
+  if (wantsHelp(args)) {
+    writeUsage(process.stdout);
+    return 0;
+  }
+
+  const parsed = parseOrUsage(() => parseDiffArgs(args));
+  if (typeof parsed === 'number') {
+    return parsed;
+  }
+
+  try {
+    const report = await detectChangedSymbols(parsed.repository, {
+      base: parsed.base,
+      head: parsed.head,
+    });
+    const output = parsed.json
+      ? formatDiffReportJson(report)
+      : `${formatDiffReport(report)}\n`;
+    process.stdout.write(output);
+    return 0;
+  } catch (error) {
+    process.stderr.write(`Change detection failed: ${errorMessage(error)}\n`);
+    return 1;
+  }
+}
+
 async function runGraph(args: readonly string[]): Promise<number> {
   const [subcommand, ...rest] = args;
 
@@ -523,6 +608,9 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === 'graph') {
     return runGraph(rest);
+  }
+  if (command === 'diff') {
+    return runDiff(rest);
   }
 
   writeUsage(process.stderr, `Unknown command: ${command}`);
