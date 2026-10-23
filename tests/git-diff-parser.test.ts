@@ -184,6 +184,51 @@ describe('parsePatchRanges', () => {
     expect(files[0]?.oldPath).toBe('src/a.ts');
     expect(files[0]?.oldRanges).toEqual([{ startLine: 1, endLine: 2 }]);
   });
+
+  it('decodes C-quoted header paths (tab, quote, backslash)', () => {
+    const patch = [
+      'diff --git "a/back\\\\slash.ts" "b/back\\\\slash.ts"',
+      '--- "a/back\\\\slash.ts"',
+      '+++ "b/back\\\\slash.ts"',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      'diff --git "a/quote\\"name.ts" "b/quote\\"name.ts"',
+      '--- "a/quote\\"name.ts"',
+      '+++ "b/quote\\"name.ts"',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      'diff --git "a/tab\\tname.ts" "b/tab\\tname.ts"',
+      '--- "a/tab\\tname.ts"',
+      '+++ "b/tab\\tname.ts"',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      '',
+    ].join('\n');
+
+    expect(parsePatchRanges(patch)).toEqual([
+      {
+        oldPath: 'back\\slash.ts',
+        newPath: 'back\\slash.ts',
+        oldRanges: [{ startLine: 1, endLine: 1 }],
+        newRanges: [{ startLine: 1, endLine: 1 }],
+      },
+      {
+        oldPath: 'quote"name.ts',
+        newPath: 'quote"name.ts',
+        oldRanges: [{ startLine: 1, endLine: 1 }],
+        newRanges: [{ startLine: 1, endLine: 1 }],
+      },
+      {
+        oldPath: 'tab\tname.ts',
+        newPath: 'tab\tname.ts',
+        oldRanges: [{ startLine: 1, endLine: 1 }],
+        newRanges: [{ startLine: 1, endLine: 1 }],
+      },
+    ]);
+  });
 });
 
 describe('parseGitDiff', () => {
@@ -262,5 +307,65 @@ describe('parseGitDiff', () => {
 
   it('returns nothing when both inputs are empty', () => {
     expect(parseGitDiff('', '')).toEqual([]);
+  });
+
+  it('matches C-quoted patch paths to raw -z paths and keeps ranges', () => {
+    const nameStatus = 'M\0back\\slash.ts\0M\0quote"name.ts\0M\0tab\tname.ts\0';
+    const patch = [
+      'diff --git "a/back\\\\slash.ts" "b/back\\\\slash.ts"',
+      '--- "a/back\\\\slash.ts"',
+      '+++ "b/back\\\\slash.ts"',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      'diff --git "a/quote\\"name.ts" "b/quote\\"name.ts"',
+      '--- "a/quote\\"name.ts"',
+      '+++ "b/quote\\"name.ts"',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      'diff --git "a/tab\\tname.ts" "b/tab\\tname.ts"',
+      '--- "a/tab\\tname.ts"',
+      '+++ "b/tab\\tname.ts"',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      '',
+    ].join('\n');
+
+    const files = parseGitDiff(nameStatus, patch);
+    const byPath = new Map(files.map((file) => [file.newPath, file]));
+    for (const path of ['back\\slash.ts', 'quote"name.ts', 'tab\tname.ts']) {
+      const file = byPath.get(path);
+      expect(file?.changeType).toBe('MODIFIED');
+      expect(file?.oldRanges).toEqual([{ startLine: 1, endLine: 1 }]);
+      expect(file?.newRanges).toEqual([{ startLine: 1, endLine: 1 }]);
+    }
+  });
+
+  it('parses a rename with content changes, keeping both sides', () => {
+    const nameStatus = 'R083\0src/old.ts\0src/new.ts\0';
+    const patch = [
+      'diff --git a/src/old.ts b/src/new.ts',
+      'similarity index 83%',
+      'rename from src/old.ts',
+      'rename to src/new.ts',
+      '--- a/src/old.ts',
+      '+++ b/src/new.ts',
+      '@@ -2 +2 @@ export function keep() {',
+      '-  return 1;',
+      '+  return 42;',
+      '',
+    ].join('\n');
+
+    expect(parseGitDiff(nameStatus, patch)).toEqual([
+      {
+        oldPath: 'src/old.ts',
+        newPath: 'src/new.ts',
+        changeType: 'RENAMED',
+        oldRanges: [{ startLine: 2, endLine: 2 }],
+        newRanges: [{ startLine: 2, endLine: 2 }],
+      },
+    ]);
   });
 });

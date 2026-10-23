@@ -62,6 +62,56 @@ async function extractArchive(archivePath: string, directory: string): Promise<v
   }
 }
 
+/** True when `candidate` is `root` itself or lies beneath it. */
+function isWithin(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+}
+
+/**
+ * Resolve the subtree to analyze inside an extracted revision workspace.
+ *
+ * Returns `undefined` unless the selected subtree exists, is a directory, and
+ * resolves (following symlinks) to a path contained within `revisionRoot`. A
+ * symlink that escapes the workspace, a regular file, or a missing path all
+ * yield `undefined` so the caller analyzes an empty graph instead of an
+ * unintended location.
+ */
+export function resolveAnalyzableSubtree(
+  revisionRoot: string,
+  prefix: string,
+): string | undefined {
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(revisionRoot);
+  } catch {
+    return undefined;
+  }
+  if (!fs.statSync(realRoot).isDirectory()) {
+    return undefined;
+  }
+  if (prefix === '') {
+    return realRoot;
+  }
+
+  let realCandidate: string;
+  try {
+    realCandidate = fs.realpathSync(path.join(revisionRoot, prefix));
+  } catch {
+    return undefined;
+  }
+  if (!isWithin(realRoot, realCandidate)) {
+    return undefined;
+  }
+  try {
+    if (!fs.statSync(realCandidate).isDirectory()) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return realCandidate;
+}
+
 async function analyzeRevision(
   gitCwd: string,
   ref: string,
@@ -76,8 +126,8 @@ async function analyzeRevision(
   await runGit(gitCwd, ['archive', '--format=tar', `--output=${archivePath}`, ref]);
   await extractArchive(archivePath, directory);
 
-  const target = prefix === '' ? directory : path.join(directory, prefix);
-  if (!fs.existsSync(target)) {
+  const target = resolveAnalyzableSubtree(directory, prefix);
+  if (target === undefined) {
     return emptyGraph();
   }
 

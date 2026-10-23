@@ -75,18 +75,114 @@ export function parseNameStatus(output: string): FileLevelChange[] {
 }
 
 /**
+ * Decode a Git C-style quoted path (`"a/foo\tbar.ts"`) back to its raw form so
+ * it can be matched against the raw paths from `--name-status -z`.
+ *
+ * Handles the escapes Git emits for special characters (`\t`, `\n`, `\"`,
+ * `\\`, ...) and `\ooo` octal bytes. The leading quote is consumed by the
+ * caller's `startsWith('"')` test; scanning stops at the unescaped closing
+ * quote, so any trailing separator is ignored.
+ */
+function decodeGitQuoted(field: string): string {
+  const body = field.slice(1);
+  const out: string[] = [];
+  let index = 0;
+
+  while (index < body.length) {
+    const char = body.charAt(index);
+    if (char === '"') {
+      break;
+    }
+    if (char !== '\\') {
+      out.push(char);
+      index += 1;
+      continue;
+    }
+
+    const next = body.charAt(index + 1);
+    switch (next) {
+      case 'a':
+        out.push('\x07');
+        index += 2;
+        break;
+      case 'b':
+        out.push('\b');
+        index += 2;
+        break;
+      case 't':
+        out.push('\t');
+        index += 2;
+        break;
+      case 'n':
+        out.push('\n');
+        index += 2;
+        break;
+      case 'v':
+        out.push('\v');
+        index += 2;
+        break;
+      case 'f':
+        out.push('\f');
+        index += 2;
+        break;
+      case 'r':
+        out.push('\r');
+        index += 2;
+        break;
+      case '"':
+        out.push('"');
+        index += 2;
+        break;
+      case '\\':
+        out.push('\\');
+        index += 2;
+        break;
+      case '':
+        out.push('\\');
+        index += 1;
+        break;
+      default: {
+        if (next >= '0' && next <= '7') {
+          let octal = '';
+          let cursor = index + 1;
+          while (cursor < body.length && octal.length < 3) {
+            const digit = body.charAt(cursor);
+            if (digit < '0' || digit > '7') {
+              break;
+            }
+            octal += digit;
+            cursor += 1;
+          }
+          out.push(String.fromCharCode(Number.parseInt(octal, 8)));
+          index = cursor;
+        } else {
+          out.push(next);
+          index += 2;
+        }
+      }
+    }
+  }
+
+  return out.join('');
+}
+
+/**
  * Extract a repository path from a `---`/`+++` header line.
  *
- * Git terminates the path with a TAB when it contains a space (so it cannot be
- * mistaken for a timestamp); `/dev/null` means that side does not exist.
+ * Git quotes the path (C-style, double-quoted) when it contains a special
+ * character such as a TAB, a double quote, or a backslash; otherwise a TAB is
+ * appended as a separator when the path contains spaces. `/dev/null` means that
+ * side does not exist. Decoding quoted paths restores the same raw bytes the
+ * authoritative `--name-status -z` output reports, so the two can be joined.
  */
-function stripSidePrefix(value: string, prefix: string): string | undefined {
-  const tabIndex = value.indexOf('\t');
-  const rawPath = tabIndex === -1 ? value : value.slice(0, tabIndex);
-  if (rawPath === NULL_DEVICE) {
+function parseSidePath(field: string, prefix: string): string | undefined {
+  const raw = field.startsWith('"')
+    ? decodeGitQuoted(field)
+    : (field.split('\t', 1)[0] ?? '');
+  if (raw === NULL_DEVICE) {
     return undefined;
   }
-  return rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath;
+  return raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
 }
 
 function countFrom(raw: string | undefined): number {
@@ -128,7 +224,7 @@ export function parsePatchRanges(patch: string): PatchFileRanges[] {
 
     if (!inHunks && line.startsWith('--- ')) {
       current = {
-        oldPath: stripSidePrefix(line.slice(4), 'a/'),
+        oldPath: parseSidePath(line.slice(4), 'a/'),
         newPath: undefined,
         oldRanges: [],
         newRanges: [],
@@ -139,7 +235,7 @@ export function parsePatchRanges(patch: string): PatchFileRanges[] {
 
     if (!inHunks && line.startsWith('+++ ')) {
       if (current !== undefined) {
-        current.newPath = stripSidePrefix(line.slice(4), 'b/');
+        current.newPath = parseSidePath(line.slice(4), 'b/');
       }
       continue;
     }

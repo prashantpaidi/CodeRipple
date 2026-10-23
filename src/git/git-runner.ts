@@ -27,6 +27,15 @@ function firstLine(value: string): string {
 }
 
 /**
+ * Remove Git's single trailing line terminator (`\n` or `\r\n`) without
+ * touching the rest of the value. Unlike `trim()`, this preserves legitimate
+ * leading/trailing spaces in paths reported by `git rev-parse`.
+ */
+export function stripLineTerminator(value: string): string {
+  return value.replace(/\r?\n$/, '');
+}
+
+/**
  * Reduce a child-process failure to a single actionable line, preferring the
  * tool's own stderr over the noisy Node error (which repeats the whole argv).
  */
@@ -97,7 +106,7 @@ export async function resolveGitRoots(repositoryPath: string): Promise<GitRoots>
 
   let toplevel: string;
   try {
-    toplevel = (await runGit(realRoot, ['rev-parse', '--show-toplevel'])).trim();
+    toplevel = stripLineTerminator(await runGit(realRoot, ['rev-parse', '--show-toplevel']));
   } catch (error) {
     if (error instanceof GitUnavailableError) {
       throw error;
@@ -110,7 +119,9 @@ export async function resolveGitRoots(repositoryPath: string): Promise<GitRoots>
   if (relative === '' || relative === '.') {
     return { toplevel: toplevelReal, prefix: '' };
   }
-  if (relative.startsWith('..')) {
+  // Path-component boundary check: `..cache` is a valid subdirectory name and
+  // must not be mistaken for an escape above the work tree.
+  if (relative === '..' || relative.startsWith('../')) {
     throw new NotAGitRepositoryError(
       `Repository path is outside its Git work tree: ${repositoryPath}`,
     );
@@ -118,14 +129,26 @@ export async function resolveGitRoots(repositoryPath: string): Promise<GitRoots>
   return { toplevel: toplevelReal, prefix: relative };
 }
 
-/** Fail with an actionable message unless `ref` resolves to a commit. */
-export async function verifyRef(
+/**
+ * Resolve `ref` to an immutable commit object ID.
+ *
+ * Fails with an actionable {@link InvalidRefError} when the ref does not name a
+ * commit. Callers freeze the result once so that a mutable ref moving mid-run
+ * cannot make different phases disagree about which commit is being examined.
+ */
+export async function resolveCommitId(
   repositoryPath: string,
   ref: string,
   label: 'base' | 'head',
-): Promise<void> {
+): Promise<string> {
   try {
-    await runGit(repositoryPath, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+    const output = await runGit(repositoryPath, [
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `${ref}^{commit}`,
+    ]);
+    return stripLineTerminator(output);
   } catch (error) {
     if (error instanceof GitUnavailableError) {
       throw error;

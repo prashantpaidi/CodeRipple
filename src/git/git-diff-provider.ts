@@ -1,5 +1,5 @@
 import { parseGitDiff } from './diff-parser.js';
-import { resolveGitRoots, runGit, verifyRef } from './git-runner.js';
+import { resolveCommitId, resolveGitRoots, runGit } from './git-runner.js';
 import type { ChangedFile } from './types.js';
 
 /**
@@ -31,40 +31,93 @@ function withinPrefix(value: string, prefix: string): boolean {
   return value === prefix || value.startsWith(`${prefix}/`);
 }
 
-function stripPrefix(value: string | undefined, prefix: string): string | undefined {
-  if (value === undefined || prefix === '') {
-    return value;
-  }
-  if (!withinPrefix(value, prefix)) {
-    return undefined;
-  }
+function stripPrefix(value: string, prefix: string): string {
   return value === prefix ? '' : value.slice(prefix.length + 1);
 }
 
 /**
  * Drop changes outside the analyzed repository and rebase surviving paths onto
- * it. A file whose base path is in the prefix but whose rename target is not
- * keeps only the side that is still relevant.
+ * it, preserving the {@link ChangedFile} contract for each change type.
+ *
+ * A rename that crosses the subtree boundary loses one side and is reclassified
+ * accordingly: inside→outside becomes DELETED, outside→inside becomes ADDED,
+ * inside→inside stays RENAMED, and outside→outside is omitted. Non-rename
+ * changes are kept only when their relevant side is inside the subtree.
  */
-function restrictToPrefix(files: readonly ChangedFile[], prefix: string): ChangedFile[] {
+export function restrictToPrefix(
+  files: readonly ChangedFile[],
+  prefix: string,
+): ChangedFile[] {
   if (prefix === '') {
     return [...files];
   }
 
+  const inside = (path: string | undefined): string | undefined =>
+    path !== undefined && withinPrefix(path, prefix) ? stripPrefix(path, prefix) : undefined;
+
   const result: ChangedFile[] = [];
   for (const file of files) {
-    const oldPath = stripPrefix(file.oldPath, prefix);
-    const newPath = stripPrefix(file.newPath, prefix);
-    if (oldPath === undefined && newPath === undefined) {
-      continue;
+    const oldPath = inside(file.oldPath);
+    const newPath = inside(file.newPath);
+
+    switch (file.changeType) {
+      case 'ADDED':
+        if (newPath !== undefined) {
+          result.push({
+            newPath,
+            changeType: 'ADDED',
+            oldRanges: [],
+            newRanges: file.newRanges,
+          });
+        }
+        break;
+      case 'DELETED':
+        if (oldPath !== undefined) {
+          result.push({
+            oldPath,
+            changeType: 'DELETED',
+            oldRanges: file.oldRanges,
+            newRanges: [],
+          });
+        }
+        break;
+      case 'MODIFIED':
+        if (oldPath !== undefined && newPath !== undefined) {
+          result.push({
+            oldPath,
+            newPath,
+            changeType: 'MODIFIED',
+            oldRanges: file.oldRanges,
+            newRanges: file.newRanges,
+          });
+        }
+        break;
+      case 'RENAMED':
+        if (oldPath !== undefined && newPath !== undefined) {
+          result.push({
+            oldPath,
+            newPath,
+            changeType: 'RENAMED',
+            oldRanges: file.oldRanges,
+            newRanges: file.newRanges,
+          });
+        } else if (oldPath !== undefined) {
+          result.push({
+            oldPath,
+            changeType: 'DELETED',
+            oldRanges: file.oldRanges,
+            newRanges: [],
+          });
+        } else if (newPath !== undefined) {
+          result.push({
+            newPath,
+            changeType: 'ADDED',
+            oldRanges: [],
+            newRanges: file.newRanges,
+          });
+        }
+        break;
     }
-    result.push({
-      ...(oldPath === undefined ? {} : { oldPath }),
-      ...(newPath === undefined ? {} : { newPath }),
-      changeType: file.changeType,
-      oldRanges: oldPath === undefined ? [] : file.oldRanges,
-      newRanges: newPath === undefined ? [] : file.newRanges,
-    });
   }
   return result;
 }
@@ -77,8 +130,8 @@ export class GitCliDiffProvider implements GitDiffProvider {
     headRef: string,
   ): Promise<ChangedFile[]> {
     const prefix = (await resolveGitRoots(repositoryPath)).prefix;
-    await verifyRef(repositoryPath, baseRef, 'base');
-    await verifyRef(repositoryPath, headRef, 'head');
+    await resolveCommitId(repositoryPath, baseRef, 'base');
+    await resolveCommitId(repositoryPath, headRef, 'head');
 
     // `core.quotePath=false` makes both invocations emit identical raw paths,
     // which is what lets the two outputs be joined by path.
