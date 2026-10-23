@@ -67,3 +67,30 @@ describe('CLI argument handling', () => {
     expect(result.stderr).toContain('Unknown command');
   });
 });
+
+describe('CLI diff command argument handling', () => {
+  it('requires a repository path', () => {
+    const result = runCli(['diff']);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Missing required <repository-path>');
+  });
+
+  it('requires --base and --head', () => {
+    const missingBase = runCli(['diff', '.']);
+    expect(missingBase.status).toBe(1);
+    expect(missingBase.stderr).toContain('Missing required --base <ref>');
+
+    const missingHead = runCli(['diff', '.', '--base', 'main']);
+    expect(missingHead.status).toBe(1);
+    expect(missingHead.stderr).toContain('Missing required --head <ref>');
+  });
+
+  it('documents the diff options in help output', () => {
+    const result = runCli(['diff', '--help']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Diff options:');
+    expect(result.stdout).toContain('--base <ref>');
+  });
+});
