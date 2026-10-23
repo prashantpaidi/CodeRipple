@@ -237,7 +237,7 @@ gitignored; only `.env.example` with placeholders is versioned.
 pnpm coderipple analyze <repository-path> [--output <file>] [--no-gitignore]
 
 # Analyze and persist into Neo4j
-pnpm coderipple index <repository-path> [--repository-id <id>] [--no-gitignore]
+pnpm coderipple index <repository-path> [--repository-id <id>] [--force] [--no-gitignore]
 
 # Query the persisted graph
 pnpm coderipple graph callers      <repository-id> <node-id>
@@ -338,6 +338,32 @@ Writes are **batched** (a fixed number of statements: one per node label and one
 per edge type, using `UNWIND`), so indexing does not issue one round trip per
 node or edge. Incremental graph diffing is intentionally **not** implemented yet.
 
+### Reusing `--repository-id`
+
+Replacement is namespaced by the repository identity, so `--repository-id`
+controls *which* graph gets replaced. Reusing an ID for a different repository
+therefore replaces the graph previously indexed under that ID.
+
+To make that hard to do by accident, CodeRipple refuses to replace an existing
+graph when an **explicit** ID is reused from a **different path**:
+
+```
+Indexing failed: Repository id "my-id" is already used by a repository at
+"/old/path". Re-run with --force (or replaceExisting: true) to replace it.
+```
+
+Derived identities (git remote + path within the working tree, or the path hash)
+are never treated as suspicious reuse: they are a function of the path/remote, so
+re-indexing the same repository — including from another clone of the same git
+repository — replaces only its own graph.
+
+Use `--force` when you *intend* to point an explicit ID at a different
+repository or path:
+
+```bash
+pnpm coderipple index ./some/other-repo --repository-id my-id --force
+```
+
 ## Testing
 
 ```bash
@@ -350,8 +376,9 @@ pnpm lint             # ESLint
 Unit tests run against real fixture repositories and exercise identity,
 configuration, mapping, and the batched persistence plan. Integration tests
 start a single Neo4j container and verify persistence, queries, re-indexing,
-repository isolation, and a generated 1,000-node / 2,000+-edge scale
-sanity check. `pnpm test` never requires Docker.
+explicit-ID reuse, repository isolation (including traversal against
+deliberately cross-repository relationships), and a generated 1,000-node /
+2,000+-edge scale sanity check. `pnpm test` never requires Docker.
 
 ## Supported languages
 

@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { edgeId } from '../../../src/graph/ids.js';
+import type { CodeGraph } from '../../../src/graph/graph-types.js';
 import type { Neo4jGraphStore } from '../../../src/storage/neo4j/neo4j-graph-store.js';
 import { analyzeFixture } from '../../helpers.js';
 import { syntheticGraph } from '../../synthetic-graph.js';
@@ -8,6 +10,43 @@ import { createTestStore, testRepository } from '../support.js';
 let store: Neo4jGraphStore;
 const repo = testRepository('queries');
 const diamondRepo = testRepository('queries_diamond');
+const pathIdentityRepo = testRepository('queries_path_identity');
+
+/**
+ * FILE -> FUNCTION with two *different* relationship types between the same node
+ * pair (CONTAINS and CALLS) — both valid shapes in the graph model. A path
+ * search must keep both rather than collapsing them by node sequence.
+ */
+function pathIdentityGraph(): CodeGraph {
+  const fileId = 'src/p.ts';
+  const functionId = 'src/p.ts::b';
+  return {
+    version: '1',
+    repository: { name: 'path-identity' },
+    nodes: [
+      { id: fileId, type: 'FILE', name: 'p.ts', path: fileId },
+      { id: functionId, type: 'FUNCTION', name: 'b', file: fileId, startLine: 1, endLine: 1 },
+    ],
+    edges: [
+      {
+        id: edgeId('CONTAINS', fileId, functionId),
+        type: 'CONTAINS',
+        from: fileId,
+        to: functionId,
+      },
+      { id: edgeId('CALLS', fileId, functionId), type: 'CALLS', from: fileId, to: functionId },
+    ],
+    unresolvedReferences: [],
+    metadata: {
+      filesAnalyzed: 1,
+      classes: 0,
+      functions: 1,
+      methods: 0,
+      resolvedCalls: 1,
+      unresolvedCalls: 0,
+    },
+  };
+}
 
 const createUser = 'src/service.ts::createUser';
 const validateUser = 'src/service.ts::validateUser';
@@ -32,6 +71,8 @@ beforeAll(async () => {
     ]),
     diamondRepo,
   );
+
+  await store.saveGraph(pathIdentityGraph(), pathIdentityRepo);
 });
 
 afterAll(async () => {
@@ -144,6 +185,24 @@ describe('path search', () => {
   it('returns no paths when the symbols are unconnected', async () => {
     const result = await store.findPaths(repo.id, validateUser, 'src/controller.ts::register');
     expect(result.paths).toEqual([]);
+  });
+
+  it('keeps paths that share nodes but use different relationship types', async () => {
+    const result = await store.findPaths(pathIdentityRepo.id, 'src/p.ts', 'src/p.ts::b', {
+      relationshipTypes: ['CONTAINS', 'CALLS'],
+      maxDepth: 1,
+    });
+
+    // Both A -CONTAINS-> B and A -CALLS-> B must be retained: same node
+    // sequence, different relationship type.
+    expect(result.paths).toHaveLength(2);
+    const edgeTypes = result.paths
+      .map((path) => path.edges.map((edge) => edge.type).join('+'))
+      .sort();
+    expect(edgeTypes).toEqual(['CALLS', 'CONTAINS']);
+    for (const path of result.paths) {
+      expect(path.nodes.map((node) => node.id)).toEqual(['src/p.ts', 'src/p.ts::b']);
+    }
   });
 });
 

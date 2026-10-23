@@ -30,6 +30,8 @@ Analyze options:
 Index options:
       --repository-id <id>  Pin the repository identity (default: derived from
                             the git origin remote, else the absolute path).
+      --force               Replace a graph already stored under the given
+                            --repository-id from a different path.
       --no-gitignore        Do not honor the repository root .gitignore.
 
 Graph options:
@@ -77,6 +79,7 @@ interface AnalyzeArgs {
 interface IndexArgs {
   repository: string;
   repositoryId?: string;
+  force: boolean;
   respectGitignore: boolean;
 }
 
@@ -172,6 +175,7 @@ function parseAnalyzeArgs(args: readonly string[]): AnalyzeArgs {
 function parseIndexArgs(args: readonly string[]): IndexArgs {
   let repository: string | undefined;
   let repositoryId: string | undefined;
+  let force = false;
   let respectGitignore = true;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -183,6 +187,8 @@ function parseIndexArgs(args: readonly string[]): IndexArgs {
     if (arg === '--repository-id') {
       repositoryId = nextValue(args, index, arg);
       index += 1;
+    } else if (arg === '--force') {
+      force = true;
     } else if (arg === '--no-gitignore') {
       respectGitignore = false;
     } else if (arg.startsWith('-')) {
@@ -198,9 +204,12 @@ function parseIndexArgs(args: readonly string[]): IndexArgs {
     throw new UsageError('Missing required <repository-path> argument');
   }
 
-  return repositoryId === undefined
-    ? { repository, respectGitignore }
-    : { repository, repositoryId, respectGitignore };
+  return {
+    repository,
+    force,
+    respectGitignore,
+    ...(repositoryId === undefined ? {} : { repositoryId }),
+  };
 }
 
 function parseGraphArgs(
@@ -390,6 +399,7 @@ async function runIndex(args: readonly string[]): Promise<number> {
     store = await createNeo4jGraphStore();
     const { graph, repository } = await indexRepository(parsed.repository, store, {
       respectGitignore: parsed.respectGitignore,
+      force: parsed.force,
       ...(parsed.repositoryId === undefined ? {} : { repositoryId: parsed.repositoryId }),
     });
     process.stdout.write(`${formatIndexSummary(graph, repository)}\n`);

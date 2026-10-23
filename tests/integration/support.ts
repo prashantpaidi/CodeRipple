@@ -114,3 +114,31 @@ export async function countRepositories(driver: Driver, repositoryId: string): P
     repositoryId,
   });
 }
+
+/** Run a scalar `... RETURN <n> AS value` query (for assertions the store hides). */
+export async function countQuery(
+  driver: Driver,
+  cypher: string,
+  params: Record<string, unknown> = {},
+): Promise<number> {
+  return scalar(driver, cypher, params);
+}
+
+/**
+ * Execute a write directly against Neo4j.
+ *
+ * Used by tests to create states the store itself would never produce, such as
+ * a relationship that crosses repository boundaries.
+ */
+export async function executeWrite(
+  driver: Driver,
+  cypher: string,
+  params: Record<string, unknown> = {},
+): Promise<void> {
+  const session = driver.session({ database: process.env.NEO4J_DATABASE ?? 'neo4j' });
+  try {
+    await session.executeWrite((transaction) => transaction.run(cypher, params));
+  } finally {
+    await session.close();
+  }
+}

@@ -11,6 +11,11 @@ import {
 export interface IndexOptions extends DiscoveryOptions {
   /** Explicit repository identity (`--repository-id`); overrides derivation. */
   repositoryId?: string;
+  /**
+   * Replace a graph already stored under this repository ID from a different
+   * path (`--force`). See `SaveGraphOptions` for the reuse guard.
+   */
+  force?: boolean;
 }
 
 export interface IndexResult {
@@ -36,7 +41,7 @@ export async function indexRepository(
   });
 
   const { graph } = analyzeRepository(inputPath, options);
-  await store.saveGraph(graph, repository);
+  await store.saveGraph(graph, repository, { replaceExisting: options.force === true });
 
   return { graph, repository };
 }

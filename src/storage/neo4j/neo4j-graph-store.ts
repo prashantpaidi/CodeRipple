@@ -16,6 +16,7 @@ import {
   type PathOptions,
   type PathResult,
   type QueryOptions,
+  type SaveGraphOptions,
   type TraversalOptions,
   resolveMaxPaths,
   resolvePathDepth,
@@ -49,6 +50,9 @@ const DELETE_REPOSITORY_NODES =
 
 const UPSERT_REPOSITORY =
   'MERGE (r:Repository {id: $repositoryId}) SET r.name = $name, r.rootPath = $rootPath';
+
+const FIND_REPOSITORY_ROOT =
+  'MATCH (r:Repository {id: $repositoryId}) RETURN r.rootPath AS rootPath';
 
 const GET_NODE = 'MATCH (node:CodeEntity {ref: $ref}) RETURN node AS node';
 
@@ -108,7 +112,11 @@ function traversalStatement(
       : `MATCH path = (other:CodeEntity)-${pattern}->(anchor:CodeEntity {ref: $ref})`;
   return [
     match,
-    'WHERE other.repositoryId = $repositoryId',
+    // Require *every* node on the path to belong to the repository, not just the
+    // endpoint: a relationship that crosses repositories (which could exist if
+    // data was written by something other than this store) must never let a
+    // traversal reach into — or route through — another repository's graph.
+    'WHERE all(n IN nodes(path) WHERE n.repositoryId = $repositoryId)',
     'WITH other, min(length(path)) AS depth',
     'RETURN other AS node, depth',
     'ORDER BY other.id',
@@ -123,6 +131,9 @@ function pathsStatement(
   const pattern = `[:${types.join('|')}*1..${depth}]`;
   return [
     `MATCH path = (a:CodeEntity {ref: $fromRef})-${pattern}->(b:CodeEntity {ref: $toRef})`,
+    // Every node on the path must belong to the repository, so a path can never
+    // route through another repository's graph.
+    'WHERE all(n IN nodes(path) WHERE n.repositoryId = $repositoryId)',
     'WITH path, nodes(path) AS pathNodes, relationships(path) AS pathRelationships',
     'ORDER BY length(path), [n IN pathNodes | n.ref]',
     // Inlined rather than parameterized: `LIMIT` requires an integer, and the
@@ -202,11 +213,37 @@ export class Neo4jGraphStore implements GraphStore {
     return this.driver.session({ database: this.config.database });
   }
 
-  async saveGraph(graph: CodeGraph, repository: RepositoryIdentity): Promise<void> {
+  async saveGraph(
+    graph: CodeGraph,
+    repository: RepositoryIdentity,
+    options: SaveGraphOptions = {},
+  ): Promise<void> {
     const plan = planPersistence(graph, repository);
     const session = this.openSession();
     try {
       await session.executeWrite(async (transaction) => {
+        // An explicitly assigned repository ID (`--repository-id`) namespaces the
+        // atomic replacement below. If that ID is already in use by a repository
+        // at a different path, replacing it silently would destroy the other
+        // repository's graph, so require explicit consent. Derived IDs are a
+        // function of the path/remote and are never treated as suspicious reuse.
+        if (repository.source === 'override' && options.replaceExisting !== true) {
+          const existing = await transaction.run(FIND_REPOSITORY_ROOT, {
+            repositoryId: repository.id,
+          });
+          const existingRootPath = existing.records[0]?.get('rootPath');
+          if (
+            typeof existingRootPath === 'string' &&
+            existingRootPath !== repository.rootPath
+          ) {
+            throw new PersistenceError(
+              `Repository id "${repository.id}" is already used by a repository at ` +
+                `"${existingRootPath}". Re-run with --force (or replaceExisting: true) ` +
+                'to replace it.',
+            );
+          }
+        }
+
         await transaction.run(DELETE_REPOSITORY_NODES, { repositoryId: repository.id });
         await transaction.run(UPSERT_REPOSITORY, {
           repositoryId: repository.id,
@@ -304,6 +341,7 @@ export class Neo4jGraphStore implements GraphStore {
         transaction.run(pathsStatement(types, depth, maxPaths), {
           fromRef: refOf(repositoryId, from),
           toRef: refOf(repositoryId, to),
+          repositoryId,
         }),
       );
       const paths = result.records.map((record) =>

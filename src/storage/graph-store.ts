@@ -41,6 +41,20 @@ export interface PathOptions extends TraversalOptions {
   maxPaths?: number;
 }
 
+export interface SaveGraphOptions {
+  /**
+   * Allow replacing an existing graph already stored under the same repository
+   * ID from a *different* path.
+   *
+   * Only relevant for explicitly assigned IDs (`--repository-id`): a derived ID
+   * is a function of the path/remote, so it can never be "reused" for a
+   * different repository. Defaults to `false`, which makes an accidental
+   * `--repository-id` collision fail loudly instead of silently replacing the
+   * previously indexed graph.
+   */
+  replaceExisting?: boolean;
+}
+
 /** A node discovered by a dependency/dependent traversal, with its distance. */
 export interface DependencyMatch {
   node: GraphNode;
@@ -71,8 +85,17 @@ export interface PathResult {
 }
 
 export interface GraphStore {
-  /** Atomically replace the stored graph for a repository. */
-  saveGraph(graph: CodeGraph, repository: RepositoryIdentity): Promise<void>;
+  /**
+   * Atomically replace the stored graph for a repository.
+   *
+   * The replacement is namespaced by `repository.id`; see
+   * {@link SaveGraphOptions} for the explicit-ID reuse guard.
+   */
+  saveGraph(
+    graph: CodeGraph,
+    repository: RepositoryIdentity,
+    options?: SaveGraphOptions,
+  ): Promise<void>;
 
   /** Fetch a single node by repository + CodeRipple node ID. */
   getNode(repositoryId: string, nodeId: string): Promise<GraphNode | null>;

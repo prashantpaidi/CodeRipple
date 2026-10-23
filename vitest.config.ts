@@ -8,5 +8,8 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, 'tests/integration/**'],
     environment: 'node',
     globals: false,
+    // Some tests launch the CLI as a subprocess through tsx; on a cold cache
+    // that startup can exceed Vitest's 5s default. This raises the ceiling only.
+    testTimeout: 30_000,
   },
 });
