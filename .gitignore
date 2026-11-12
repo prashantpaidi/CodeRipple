@@ -4,3 +4,9 @@ coverage/
 *.log
 .DS_Store
 .env
+
+# agent scratch dirs (herdr / command-code)
+.agents/
+.claude/
+.commandcode/
+skills-lock.json
