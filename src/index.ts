@@ -87,3 +87,7 @@ export { loadEnvFileIfPresent, loadNeo4jConfig } from './storage/neo4j/neo4j-con
 export type { Neo4jConfig } from './storage/neo4j/neo4j-config.js';
 export { createNeo4jGraphStore } from './storage/neo4j/neo4j-graph-store.js';
 
+export { analyzeImpact, analyzeImpactGraphs } from './impact/impact-analysis.js';
+export type { ImpactAnalysisOptions, ImpactGraphInput } from './impact/impact-analysis.js';
+export { IMPACT_LEVELS, impactReportSchema } from './impact/impact-report.js';
+export type { ImpactLevel, ImpactReport } from './impact/impact-report.js';
