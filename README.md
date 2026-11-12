@@ -442,3 +442,21 @@ Storage/query limitations:
 None of the deferred items above are implemented yet.
 
 [ts-morph]: https://ts-morph.com/
+
+### Programmatic impact analysis
+
+`analyzeImpact(repositoryPath, { base, head, depth, graphOptions })` resolves the Git
+revisions to commit SHAs, builds isolated in-memory graphs, and returns an
+`ImpactReport` validated by `impactReportSchema`. `graphOptions` accepts the
+same discovery options as `analyzeRepository`. `analyzeImpactGraphs` offers the
+same engine for already-built graphs without Git or Neo4j.
+
+Reverse `CALLS` traversal is bounded by `depth` and records a deterministic
+shortest path per changed symbol and affected node. Additions and modifications
+use the head graph; deletions use the base graph. Every path includes its source
+revision and edge evidence. Containment supplies structural class and file
+context, while imports indicate potential module-level impact only. Unresolved
+references are reported separately for each revision used; they do not imply an
+invented dependency. Binary, unsupported, and range-free changes may have no
+mapped symbol and are recorded as limitations. Static analysis can miss dynamic
+calls and other dependencies, so this report is not an exhaustive guarantee.

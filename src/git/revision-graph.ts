@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { analyzeRepository } from '../cli/analyze.js';
+import type { DiscoveryOptions } from '../parser/repository-parser.js';
 import { GRAPH_VERSION, type CodeGraph } from '../graph/graph-types.js';
 import { GitUnavailableError, RevisionAnalysisError } from './errors.js';
 import {
@@ -118,6 +119,7 @@ async function analyzeRevision(
   workspace: string,
   label: 'base' | 'head',
   prefix: string,
+  options: DiscoveryOptions,
 ): Promise<CodeGraph> {
   const directory = path.join(workspace, label);
   await fs.promises.mkdir(directory, { recursive: true });
@@ -132,7 +134,7 @@ async function analyzeRevision(
   }
 
   try {
-    return analyzeRepository(target).graph;
+    return analyzeRepository(target, options).graph;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new RevisionAnalysisError(
@@ -156,13 +158,14 @@ export async function buildRevisionGraphs(
   repositoryPath: string,
   baseRef: string,
   headRef: string,
+  options: DiscoveryOptions = {},
 ): Promise<RevisionGraphs> {
   const { toplevel, prefix } = await resolveGitRoots(repositoryPath);
   const workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'coderipple-rev-'));
 
   try {
-    const baseGraph = await analyzeRevision(toplevel, baseRef, workspace, 'base', prefix);
-    const headGraph = await analyzeRevision(toplevel, headRef, workspace, 'head', prefix);
+    const baseGraph = await analyzeRevision(toplevel, baseRef, workspace, 'base', prefix, options);
+    const headGraph = await analyzeRevision(toplevel, headRef, workspace, 'head', prefix, options);
     return { baseGraph, headGraph };
   } finally {
     await fs.promises.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
