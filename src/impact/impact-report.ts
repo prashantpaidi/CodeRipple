@@ -22,6 +22,12 @@ export const impactReportSchema = z.object({
   baseSha: z.string().min(1), headSha: z.string().min(1),
   changedSymbols: z.array(changedSymbol), affectedSymbols: z.array(affected), affectedFiles: z.array(affected),
   impactPaths: z.array(impactPath),
+  testRecommendations: z.array(z.object({
+    changedSymbolId: z.string().min(1), revision, testFile: z.string().min(1),
+    confidence: z.enum(['static-call', 'module-import']), reason: z.string().min(1),
+    nodeIds: z.array(z.string().min(1)).min(1), edges: z.array(graphEdgeSchema),
+  }).strict()),
+  changesWithoutDetectedTests: z.array(z.object({ changedSymbolId: z.string().min(1), revision }).strict()),
   traversal: z.object({ depth: z.number().int().nonnegative(), graphOptions: z.object({ ignoredDirectories: z.array(z.string()), respectGitignore: z.boolean() }).strict() }).strict(),
   unresolvedReferences: z.array(z.object({ revision, reference: unresolvedReferenceSchema }).strict()),
   limitations: z.array(z.string()),

@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 /** File extensions CodeRipple analyzes. */
-export const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'] as const;
+export const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'] as const;
 
 /** Directories that are always skipped during discovery. */
 export const DEFAULT_IGNORED_DIRECTORIES = [
@@ -35,7 +35,7 @@ export function hasSourceExtension(filePath: string): boolean {
 
 /** True for TypeScript declaration files (`.d.ts`), which we do not analyze. */
 export function isDeclarationFile(filePath: string): boolean {
-  return filePath.endsWith('.d.ts');
+  return /\.d\.[cm]?ts$/.test(filePath);
 }
 
 /** Heuristic: treat `.min.js` / `.min.ts` style bundles as generated noise. */
@@ -56,4 +56,11 @@ export function compareStrings(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
+}
+
+/** Jest and Vitest default test file conventions among analyzed source files. */
+export function isTestFile(filePath: string): boolean {
+  const normalized = toPosixPath(filePath);
+  return hasSourceExtension(normalized) &&
+    (/(?:^|\/)__tests__\//.test(normalized) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(normalized));
 }

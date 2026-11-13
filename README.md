@@ -382,15 +382,15 @@ deliberately cross-repository relationships), and a generated 1,000-node /
 
 ## Supported languages
 
-- TypeScript: `.ts`, `.tsx`
-- JavaScript: `.js`, `.jsx`
+- TypeScript: `.ts`, `.tsx`, `.mts`, `.cts`
+- JavaScript: `.js`, `.jsx`, `.mjs`, `.cjs`
 
 CodeRipple currently analyzes **JavaScript/TypeScript repositories only**. It
 does not claim support for arbitrary programming languages.
 
 Discovery ignores `node_modules/`, `dist/`, `build/`, `coverage/`, `.next/`,
 and `.git/`, honors the repository root `.gitignore`, and skips declaration
-(`.d.ts`) and minified (`.min.*`) files.
+(`.d.ts`, `.d.mts`, `.d.cts`) and minified (`.min.*`) files.
 
 ## Known limitations
 
@@ -460,3 +460,14 @@ references are reported separately for each revision used; they do not imply an
 invented dependency. Binary, unsupported, and range-free changes may have no
 mapped symbol and are recorded as limitations. Static analysis can miss dynamic
 calls and other dependencies, so this report is not an exhaustive guarantee.
+
+`testRecommendations` identifies analyzed Jest/Vitest files named `*.test.*` or
+`*.spec.*`, and source files under `__tests__`. Each recommendation names the
+changed symbol and revision and includes a reason and graph path. `static-call`
+means a resolved call path leads from the test file to the change;
+`module-import` is lower-confidence evidence that the test imports a module
+containing changed or impacted code. Neither proves that a test executes or
+checks the changed behavior. `changesWithoutDetectedTests` lists mapped changes
+for which no relationship was found; it does not mean that no tests exist.
+Discovery follows the same source extensions, ignore rules and traversal depth
+as the rest of the analysis. Dynamic execution and coverage are not collected.
