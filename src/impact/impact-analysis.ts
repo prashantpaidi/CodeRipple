@@ -7,6 +7,7 @@ import { resolveRepositoryIdentity, type RepositoryIdentity } from '../storage/r
 import { compareStrings, isTestFile } from '../utils/paths.js';
 import { mapChangedSymbols } from './changed-symbol-mapper.js';
 import { impactReportSchema, type ImpactLevel, type ImpactReport } from './impact-report.js';
+import { assessRisk } from './risk.js';
 import type { ChangedSymbol } from './types.js';
 
 export interface ImpactAnalysisOptions {
@@ -184,9 +185,10 @@ export function analyzeImpactGraphs(input: ImpactGraphInput): ImpactReport {
   }
   const ordered = <T>(items: Iterable<T>): T[] => [...items].sort((a, b) => compareStrings(sortKey(a), sortKey(b)));
   const allAffected = ordered(affected.values());
-  return impactReportSchema.parse({ schemaVersion: '1', repository: input.repository, baseSha: input.baseSha, headSha: input.headSha,
+  const report = { schemaVersion: '1', repository: input.repository, baseSha: input.baseSha, headSha: input.headSha,
     changedSymbols: changed, affectedSymbols: allAffected.filter((entry) => entry.node.type !== 'FILE'), affectedFiles: allAffected.filter((entry) => entry.node.type === 'FILE'),
-    impactPaths: ordered(paths.values()), testRecommendations: ordered(recommendations.values()), changesWithoutDetectedTests: ordered(withoutTests), traversal: { depth: input.depth, graphOptions }, unresolvedReferences: ordered(unresolved.values()), limitations: [...limitations].sort(compareStrings) });
+    impactPaths: ordered(paths.values()), testRecommendations: ordered(recommendations.values()), changesWithoutDetectedTests: ordered(withoutTests), traversal: { depth: input.depth, graphOptions }, unresolvedReferences: ordered(unresolved.values()), limitations: [...limitations].sort(compareStrings) } as const;
+  return impactReportSchema.parse({ ...report, risk: assessRisk(report) });
 }
 
 /** Freeze refs once, then diff and analyze the same two immutable revisions. */

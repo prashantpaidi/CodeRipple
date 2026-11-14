@@ -31,6 +31,7 @@ export const impactReportSchema = z.object({
   traversal: z.object({ depth: z.number().int().nonnegative(), graphOptions: z.object({ ignoredDirectories: z.array(z.string()), respectGitignore: z.boolean() }).strict() }).strict(),
   unresolvedReferences: z.array(z.object({ revision, reference: unresolvedReferenceSchema }).strict()),
   limitations: z.array(z.string()),
+  risk: z.object({ category: z.enum(['LOW', 'MEDIUM', 'HIGH']), indicators: z.object({ dependentCount: z.number().int().nonnegative(), minDepth: z.number().int().nonnegative().nullable(), maxDepth: z.number().int().nonnegative().nullable(), affectedFiles: z.number().int().nonnegative(), affectedModules: z.number().int().nonnegative(), apiEntryPoints: z.array(z.string()), affectedTests: z.number().int().nonnegative(), unresolvedCount: z.number().int().nonnegative(), changeTypes: z.array(z.enum(SYMBOL_CHANGE_TYPES)) }).strict(), reasons: z.array(z.string()) }).strict(),
 }).strict();
 export type ImpactReport = z.infer<typeof impactReportSchema>;
 export type ImpactLevel = (typeof IMPACT_LEVELS)[number];

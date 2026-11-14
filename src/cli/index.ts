@@ -6,6 +6,8 @@ import { EDGE_TYPES, type EdgeType } from '../graph/graph-types.js';
 import { errorMessage } from '../storage/errors.js';
 import { createNeo4jGraphStore } from '../storage/neo4j/neo4j-graph-store.js';
 import { loadEnvFileIfPresent } from '../storage/neo4j/neo4j-config.js';
+import { analyzeImpact } from '../impact/impact-analysis.js';
+import { formatImpactReport } from './impact.js';
 import { detectChangedSymbols } from '../impact/detect-changed-symbols.js';
 import { analyzeRepository, formatSummary } from './analyze.js';
 import { formatDiffReport, formatDiffReportJson } from './diff.js';
@@ -25,6 +27,7 @@ Usage:
   coderipple graph <callers|callees|dependencies|dependents> <repository-id> <node-id> [options]
   coderipple graph paths <repository-id> <from-node-id> <to-node-id> [options]
   coderipple diff <repository-path> --base <ref> --head <ref> [options]
+  coderipple impact <repository-path> --base <ref> --head <ref> [options]
 
 Analyze options:
   -o, --output <file>   Write the code graph JSON to <file>.
@@ -41,6 +44,14 @@ Graph options:
       --depth <n>           Maximum hops for dependencies/dependents/paths.
       --max-paths <n>       Maximum paths to return (paths query only).
       --relationships <a,b> Relationship types to traverse (default: CALLS).
+
+Impact options:
+      --base <ref>          Base revision (required).
+      --head <ref>          Head revision (required).
+      --depth <n>           Maximum call hops (default: 3; zero allowed).
+      --format <format>     text, markdown, or json (default: text).
+      --limit <n>           Maximum items per human-readable section (default: 50).
+      --no-gitignore        Do not honor the repository root .gitignore.
 
 Diff options:
       --base <ref>          Base revision to compare from (required).
@@ -377,6 +388,39 @@ function parseDiffArgs(args: readonly string[]): DiffArgs {
   return { repository, base, head, json };
 }
 
+interface ImpactArgs { repository: string; base: string; head: string; depth: number; format: 'text' | 'markdown' | 'json'; limit: number; respectGitignore: boolean }
+
+function parseImpactArgs(args: readonly string[]): ImpactArgs {
+  let repository: string | undefined, base: string | undefined, head: string | undefined;
+  let depth = 3, limit = 50, respectGitignore = true;
+  let format: ImpactArgs['format'] = 'text';
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--base' || arg === '--head' || arg === '--depth' || arg === '--format' || arg === '--limit') {
+      const value = nextValue(args, i, arg); i++;
+      if (arg === '--base') base = value;
+      else if (arg === '--head') head = value;
+      else if (arg === '--format') {
+        if (value !== 'text' && value !== 'markdown' && value !== 'json') throw new UsageError(`Invalid --format value: ${value}`);
+        format = value;
+      } else if (arg === '--depth') {
+        if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new UsageError(`Invalid --depth value: ${value}`);
+        depth = Number(value);
+      } else {
+        limit = parsePositiveInt(value, arg);
+        if (!Number.isSafeInteger(limit)) throw new UsageError(`Invalid --limit value: ${value}`);
+      }
+    } else if (arg === '--no-gitignore') respectGitignore = false;
+    else if (arg?.startsWith('-')) throw new UsageError(`Unknown option: ${arg}`);
+    else if (repository === undefined) repository = arg;
+    else throw new UsageError(`Unexpected argument: ${arg}`);
+  }
+  if (!repository) throw new UsageError('Missing required <repository-path> argument');
+  if (!base) throw new UsageError('Missing required --base <ref> option');
+  if (!head) throw new UsageError('Missing required --head <ref> option');
+  return { repository, base, head, depth, format, limit, respectGitignore };
+}
+
 /* ------------------------------------------------------------------ *
  * Output helpers
  * ------------------------------------------------------------------ */
@@ -570,6 +614,20 @@ async function runDiff(args: readonly string[]): Promise<number> {
   }
 }
 
+async function runImpact(args: readonly string[]): Promise<number> {
+  if (wantsHelp(args)) { writeUsage(process.stdout); return 0; }
+  const parsed = parseOrUsage(() => parseImpactArgs(args));
+  if (typeof parsed === 'number') return parsed;
+  try {
+    const report = await analyzeImpact(parsed.repository, { base: parsed.base, head: parsed.head, depth: parsed.depth, graphOptions: { respectGitignore: parsed.respectGitignore } });
+    process.stdout.write(parsed.format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : formatImpactReport(report, parsed.format, parsed.limit));
+    return 0;
+  } catch (error) {
+    process.stderr.write(`Impact analysis failed: ${errorMessage(error)}\n`);
+    return 1;
+  }
+}
+
 async function runGraph(args: readonly string[]): Promise<number> {
   const [subcommand, ...rest] = args;
 
@@ -608,6 +666,9 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === 'graph') {
     return runGraph(rest);
+  }
+  if (command === 'impact') {
+    return runImpact(rest);
   }
   if (command === 'diff') {
     return runDiff(rest);

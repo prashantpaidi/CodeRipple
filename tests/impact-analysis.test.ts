@@ -71,3 +71,17 @@ describe('impact analysis', () => {
     expect(result.impactPaths).toContainEqual(expect.objectContaining({ nodeIds: ['C', 'C.m', 'validateUser'], edges: [edge('CONTAINS', 'C', 'C.m'), edge('CALLS', 'C.m', 'validateUser')] }));
   });
 });
+
+describe('risk indicators', () => {
+  it('measures call depth and elevates deleted symbols', () => {
+    const report = run({ changedSymbols: [change('validateUser', 'DELETED')] });
+    expect(report.risk.category).toBe('HIGH');
+    expect(report.risk.indicators).toMatchObject({ dependentCount: 2, minDepth: 1, maxDepth: 2, changeTypes: ['DELETED'] });
+  });
+  it('reports uncertainty and no invented API entries', () => {
+    const result = run({ depth: 0 });
+    expect(result.risk.category).toBe('MEDIUM');
+    expect(result.risk.indicators).toMatchObject({ dependentCount: 0, minDepth: null, maxDepth: null, apiEntryPoints: [] });
+    expect(run({ changedSymbols: [] }).risk.category).toBe('LOW');
+  });
+});
