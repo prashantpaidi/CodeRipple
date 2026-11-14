@@ -674,3 +674,21 @@ describeGit('resolveGitRoots path boundaries', () => {
     expect(roots.toplevel).toBe(fs.realpathSync(repoDir));
   });
 });
+
+describeGit('local impact report', () => {
+  it('connects changes, callers and suggested tests across revisions', async () => {
+    const { analyzeImpact } = await import('../src/impact/impact-analysis.js');
+    const dir = makeRepo();
+    write(dir, 'src/service.ts', 'export function service() { return 1; }\n');
+    write(dir, 'src/app.ts', "import { service } from './service';\nexport function app() { return service(); }\n");
+    write(dir, 'tests/app.test.ts', "import { app } from '../src/app';\napp();\n");
+    commit(dir, 'base', 'base');
+    write(dir, 'src/service.ts', 'export function service() { return 2; }\n');
+    commit(dir, 'head', 'head');
+    const report = await analyzeImpact(dir, { base: 'base', head: 'head', depth: 3 });
+    expect(report.changedSymbols.some((x) => x.filePath === 'src/service.ts')).toBe(true);
+    expect(report.affectedSymbols.some((x) => x.node.name === 'app')).toBe(true);
+    expect(report.impactPaths.some((x) => x.edges.some((e) => e.type === 'CALLS'))).toBe(true);
+    expect(report.testRecommendations.some((x) => x.testFile === 'tests/app.test.ts')).toBe(true);
+  });
+});

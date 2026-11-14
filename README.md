@@ -471,3 +471,9 @@ checks the changed behavior. `changesWithoutDetectedTests` lists mapped changes
 for which no relationship was found; it does not mean that no tests exist.
 Discovery follows the same source extensions, ignore rules and traversal depth
 as the rest of the analysis. Dynamic execution and coverage are not collected.
+
+### Local impact report
+
+Run `pnpm coderipple impact ./repo --base main --head HEAD --depth 3 --format markdown` to compare committed revisions without Neo4j. Formats are `text` (default), `markdown`, and `json`. `--depth` bounds call traversal (default 3, zero allowed); `--limit` bounds items per text or Markdown section (default 50). JSON is complete and uses the versioned ImpactReport schema. `--no-gitignore` disables root gitignore filtering. Exit status is 0 for a completed report regardless of risk, and 1 for invalid arguments or analysis errors.
+
+Risk is a deterministic heuristic, not a probability. HIGH means a deleted symbol, at least 10 detected dependent symbols, at least 10 affected files, or a potential API entry point. MEDIUM means detected dependents or potential importing modules, unresolved references, analysis limitations, or a change without a detected test. Otherwise risk is LOW. Indicators include call-path depth, affected files and modules, suggested tests, unresolved references and change types. Potential API entry points are inferred from `api`, `route(s)`, or `controller(s)` path segments and `handle`, `route`, or `controller` name prefixes; they are not verified exports or routes. Test suggestions and imports are static evidence, not proof of execution. Unresolved references and limitations describe uncertainty, and traversal depth may hide further impact. Deleted symbols use the base revision; additions and modifications use the head revision.
