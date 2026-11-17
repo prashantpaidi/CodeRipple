@@ -3,6 +3,7 @@ import type { Node } from 'ts-morph';
 import type { RepositoryConfig } from '../config/repository-config.js';
 import type { ParsedRepository } from '../parser/file-parser.js';
 import { resolveCalls } from '../parser/call-resolver.js';
+import { extractNestRoutes } from '../parser/nest-routes.js';
 import { resolveImports } from '../parser/import-resolver.js';
 import { extractSymbols } from '../parser/symbol-extractor.js';
 import { compareStrings, toPosixPath } from '../utils/paths.js';
@@ -86,6 +87,10 @@ export function buildGraph(
     }
   }
 
+  for (const [, sourceFile] of entries) {
+    extractNestRoutes(sourceFile, declarationToNodeId, nodeById);
+  }
+
   for (const [relativePath, sourceFile] of entries) {
     for (const edge of resolveImports(sourceFile, relativePath, analyzedByAbsolutePath)) {
       addEdge(edge);
@@ -108,7 +113,7 @@ export function buildGraph(
   unresolvedReferences.sort(compareUnresolved);
 
   return validateCodeGraph({
-    version: GRAPH_VERSION,
+    version: nodes.some((node) => node.type === 'METHOD' && node.route !== undefined) ? '2' : GRAPH_VERSION,
     repository: { name: config.name },
     nodes,
     edges,

@@ -5,7 +5,7 @@ export function assessRisk(report: Omit<ImpactReport, 'risk'>): ImpactReport['ri
   const callPaths = report.impactPaths.filter((p) => p.edges.length > 0 && p.edges.every((e) => e.type === 'CALLS'));
   const dependents = new Set(callPaths.map((p) => `${p.revision.side}:${p.nodeIds[0]}`));
   const depths = callPaths.map((p) => p.edges.length);
-  const apiEntryPoints = report.affectedSymbols.filter(({ node }) => /(^|\/)(api|routes?|controllers?)(\/|\.|$)/i.test(node.type === 'FILE' ? node.path : node.file) || /^(handle|controller|route)/i.test(node.name)).map(({ node, revision }) => `${revision.side}:${node.id}`).sort();
+  const apiEntryPoints = report.affectedSymbols.filter(({ node }) => (node.type === 'METHOD' && node.route !== undefined) || /(^|\/)(api|routes?|controllers?)(\/|\.|$)/i.test(node.type === 'FILE' ? node.path : node.file) || /^(handle|controller|route)/i.test(node.name)).map(({ node, revision }) => `${revision.side}:${node.id}`).sort();
   const indicators = {
     dependentCount: dependents.size,
     minDepth: depths.length ? Math.min(...depths) : null,

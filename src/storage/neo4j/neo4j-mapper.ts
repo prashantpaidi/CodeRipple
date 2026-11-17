@@ -75,6 +75,7 @@ export function graphNodeToProperties(
         ...common,
         file: node.file,
         parent: node.parent,
+        ...(node.route ? { routeFramework: node.route.framework, routeMethod: node.route.method, routeControllerPath: node.route.controllerPath, routeHandlerPath: node.route.handlerPath } : {}),
         startLine: node.startLine,
         endLine: node.endLine,
       };
@@ -122,6 +123,7 @@ export function propertiesToGraphNode(properties: Record<string, unknown>): Grap
         name,
         file: properties.file,
         parent: properties.parent,
+        ...(properties.routeFramework !== undefined ? { route: { framework: properties.routeFramework, method: properties.routeMethod, controllerPath: properties.routeControllerPath, handlerPath: properties.routeHandlerPath } } : {}),
         startLine: properties.startLine,
         endLine: properties.endLine,
       };

@@ -50,6 +50,7 @@ export const methodNodeSchema = z
     name: nonEmptyString,
     file: nonEmptyString,
     parent: nonEmptyString,
+    route: z.object({ framework: z.literal('nestjs'), method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD', 'ALL']), controllerPath: z.string(), handlerPath: z.string() }).strict().optional(),
     startLine: positiveLine,
     endLine: positiveLine,
   })
@@ -93,7 +94,7 @@ export const graphMetadataSchema = z
 
 const graphBodySchema = z
   .object({
-    version: z.literal('1'),
+    version: z.enum(['1', '2']),
     repository: z.object({ name: nonEmptyString }).strict(),
     nodes: z.array(graphNodeSchema),
     edges: z.array(graphEdgeSchema),
@@ -144,6 +145,9 @@ function edgeShapeError(
  * accepts is safe to persist and to diff across commits.
  */
 export const codeGraphSchema = graphBodySchema.superRefine((graph, ctx) => {
+  if (graph.version === '1' && graph.nodes.some((node) => node.type === 'METHOD' && node.route !== undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Route metadata requires graph version 2', path: ['version'] });
+  }
   const nodeById = new Map<string, GraphNode>();
   for (const [index, node] of graph.nodes.entries()) {
     if (nodeById.has(node.id)) {

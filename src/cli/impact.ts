@@ -10,7 +10,7 @@ export function formatImpactReport(report: ImpactReport, format: 'text' | 'markd
     if (items.length > limit) rows.push(`- ${items.length - limit} more omitted (use --limit to show more).`);
   };
   section('Changed symbols', report.changedSymbols.map((s) => `${s.changeType} ${s.nodeId} (${s.filePath})`));
-  section('Affected dependents and files', [...report.affectedSymbols, ...report.affectedFiles].filter((x) => x.level !== 'directly-changed').map((x) => `${x.node.id} [${x.revision.side}; ${x.level}]`));
+  section('Affected dependents and files', [...report.affectedSymbols, ...report.affectedFiles].filter((x) => x.level !== 'directly-changed').map((x) => `${x.node.id}${x.node.type === 'METHOD' && x.node.route ? ` (NestJS ${x.node.route.method}, controller ${JSON.stringify(x.node.route.controllerPath)}, handler ${JSON.stringify(x.node.route.handlerPath)})` : ''} [${x.revision.side}; ${x.level}]`));
   section('Impact paths', report.impactPaths.filter((p) => p.edges.length > 0).map((p) => `${p.nodeIds.join(' → ')} [${p.revision.side}; ${p.edges.map((e) => e.type).join(', ')}]`));
   section('Suggested tests', report.testRecommendations.map((t) => `${t.testFile} [${t.confidence}; ${t.changedSymbolId}]`));
   section('Potential API entry points', report.risk.indicators.apiEntryPoints);

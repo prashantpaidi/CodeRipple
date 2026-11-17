@@ -61,6 +61,7 @@ export interface MethodNode {
   name: string;
   file: string;
   parent: string;
+  route?: { framework: 'nestjs'; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD' | 'ALL'; controllerPath: string; handlerPath: string };
   startLine: number;
   endLine: number;
 }
@@ -91,7 +92,7 @@ export interface GraphMetadata {
 }
 
 export interface CodeGraph {
-  version: '1';
+  version: '1' | '2';
   repository: {
     name: string;
   };
