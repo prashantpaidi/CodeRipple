@@ -91,3 +91,6 @@ export { analyzeImpact, analyzeImpactGraphs } from './impact/impact-analysis.js'
 export type { ImpactAnalysisOptions, ImpactGraphInput } from './impact/impact-analysis.js';
 export { IMPACT_LEVELS, impactReportSchema } from './impact/impact-report.js';
 export type { ImpactLevel, ImpactReport } from './impact/impact-report.js';
+
+export { retrieveEvidence, retrieveRevisionEvidence } from './retrieval/evidence.js';
+export type { EmbeddingProvider, RetrievalInput, RetrievalOptions, EvidenceItem, EvidencePackage } from './retrieval/evidence.js';
