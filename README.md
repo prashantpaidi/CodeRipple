@@ -484,3 +484,25 @@ Risk is a deterministic heuristic, not a probability. HIGH means a deleted symbo
 The analyzer recognizes NestJS controller and HTTP handler decorators imported by name (including aliases) from `@nestjs/common`. A method with one controller decorator and one supported HTTP decorator receives route metadata when both decorator paths are string literals or omitted. The metadata records the controller and handler paths separately: global prefixes, module configuration, runtime registration, and route reachability are not inferred. Dynamic paths, arrays, namespace imports, and indirect decorators are left unclassified. Express routes and framework-specific test case discovery are not currently supported; existing call and test-file import analysis still applies.
 
 A service call statically resolved inside a recognized handler connects the service to that handler in the normal impact report. Route metadata is evidence of a declaration, not proof that the route is registered or executed. Projects without detected routes retain graph version 1 and their existing output. Graphs with route metadata use version 2; version 1 graphs remain readable. Neo4j stores the optional route properties on the existing method node, and re-indexing atomically replaces a repository's old graph, so no destructive database migration is required. Consumers of graph JSON should accept version 2 before using route metadata.
+
+### Source-grounded retrieval
+
+`retrieveRevisionEvidence(repositoryPath, base, head, question, options)` builds an
+in-memory evidence package for a question using the same revision graphs and
+changed-symbol detection as impact analysis. It resolves refs to commit IDs and
+reads snippets from Git objects, so uncommitted files cannot be mistaken for
+current evidence. Deleted symbols and their callers use base-revision evidence;
+other search results use the head revision. Each item identifies its repository,
+revision, path, symbol, line range, and whether its snippet was truncated. Resolved
+relationships and unresolved references are included separately; a call edge is
+static evidence, not proof of runtime execution.
+
+`retrieveEvidence` accepts in-memory graphs, changed symbols, and a revision-aware
+source reader for integrations. Optional `embeddings` supplies an
+`EmbeddingProvider` with an async `embed(texts)` method; vectors are kept local
+for the request and ranked by cosine similarity alongside lexical matching and
+incoming call traversal. No embedding service or vector database is required.
+The returned structured package is ready for a caller to inspect or pass to an
+LLM; CodeRipple makes no LLM call. `depth`, `maxResults`, `maxSnippetChars`, and
+`maxContextChars` bound retrieval, and limitations report missing source and
+truncation. Source readers supplied by integrations must honor the commit ID.
