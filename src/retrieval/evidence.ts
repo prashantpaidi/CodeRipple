@@ -1,5 +1,5 @@
 import { buildRevisionGraphs } from '../git/revision-graph.js';
-import { resolveCommitId, resolveGitRoots, runGit } from '../git/git-runner.js';
+import { createRevisionSourceReader, resolveCommitId } from '../git/git-runner.js';
 import { GitCliDiffProvider } from '../git/git-diff-provider.js';
 import type { CodeGraph, GraphEdge, GraphNode, UnresolvedReference } from '../graph/graph-types.js';
 import { mapChangedSymbols } from '../impact/changed-symbol-mapper.js';
@@ -168,7 +168,7 @@ export async function retrieveRevisionEvidence(repositoryPath: string, base: str
   const headSha = await resolveCommitId(repositoryPath, head, 'head');
   const graphs = await buildRevisionGraphs(repositoryPath, baseSha, headSha);
   const files = await new GitCliDiffProvider().diff(repositoryPath, baseSha, headSha);
-  const roots = await resolveGitRoots(repositoryPath);
+  const readSource = await createRevisionSourceReader(repositoryPath);
   return retrieveEvidence({ repository: resolveRepositoryIdentity(repositoryPath), baseSha, headSha, ...graphs, changedSymbols: mapChangedSymbols(files, graphs.baseGraph, graphs.headGraph),
-    readSource: (sha, file) => runGit(roots.toplevel, ['show', `${sha}:${roots.prefix ? `${roots.prefix}/` : ''}${file}`]) }, question, options);
+    readSource }, question, options);
 }

@@ -30,8 +30,8 @@ function gitAvailable(): boolean {
 
 function initRepoWithRemote(remote: string): string {
   const dir = fs.realpathSync(makeTempDir());
-  execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: dir });
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
   return dir;
 }
 

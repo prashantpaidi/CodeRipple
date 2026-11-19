@@ -7,12 +7,10 @@ understand how changes propagate through functions, services, APIs, databases,
 and tests. Ask "what breaks if I change this?" and CodeRipple wants to answer
 with a graph, not a guess.
 
-> **Current state — static analysis + graph storage.** CodeRipple performs
-> deterministic static analysis of JavaScript/TypeScript repositories, emits a
-> code graph, persists it in **Neo4j**, and answers deterministic dependency
-> queries over it. It does **not** yet include Git-diff analysis, blast-radius
-> scoring, GraphRAG, LLMs, or GitHub integration — those are deliberately
-> deferred (see [Roadmap](#roadmap)).
+> CodeRipple performs deterministic static analysis of JavaScript/TypeScript
+> repositories, answers dependency queries over graphs indexed in **Neo4j**,
+> and produces local impact reports from Git revisions. Impact reports can
+> include an opt-in, source-grounded explanation.
 
 ## Purpose
 
@@ -45,6 +43,10 @@ The **analyzer has no knowledge of Neo4j**: it produces a `CodeGraph` and can be
 used entirely on its own. Persistence and queries sit behind the `GraphStore`
 interface, and the Neo4j implementation maps the graph to/from Neo4j internally
 so no driver objects ever leak into application code.
+
+Impact analysis uses in-memory revision graphs and changed-symbol detection to
+produce the canonical `ImpactReport`. The CLI can attach an optional explanation
+after the report is complete.
 
 ## Repository
 
@@ -432,14 +434,12 @@ Storage/query limitations:
 
 - ✅ Deterministic JS/TS static analysis and code graph.
 - ✅ Neo4j persistence and deterministic dependency queries.
-- **Git diff → changed-symbol detection.**
-- **Blast-radius analysis** built on `dependents`/`dependencies` and path queries.
-- **Hybrid retrieval** and **GraphRAG** for impact analysis.
-- **LLM**-assisted explanations.
+- ✅ Git diff → changed-symbol detection.
+- ✅ Static blast-radius analysis and test recommendations.
+- ✅ Source-grounded retrieval with optional embeddings.
+- ✅ Opt-in LLM-assisted explanations.
 - **GitHub PR** analysis and change-impact reports.
 - Additional language analyzers.
-
-None of the deferred items above are implemented yet.
 
 [ts-morph]: https://ts-morph.com/
 
@@ -502,7 +502,56 @@ source reader for integrations. Optional `embeddings` supplies an
 `EmbeddingProvider` with an async `embed(texts)` method; vectors are kept local
 for the request and ranked by cosine similarity alongside lexical matching and
 incoming call traversal. No embedding service or vector database is required.
-The returned structured package is ready for a caller to inspect or pass to an
-LLM; CodeRipple makes no LLM call. `depth`, `maxResults`, `maxSnippetChars`, and
+The retrieval API returns the structured package to the caller. `depth`,
+`maxResults`, `maxSnippetChars`, and
 `maxContextChars` bound retrieval, and limitations report missing source and
 truncation. Source readers supplied by integrations must honor the commit ID.
+
+### Opt-in impact explanations
+
+Set `OPENAI_API_KEY` and `CODERIPPLE_OPENAI_MODEL` in the shell environment.
+Use a model available to your project that supports Structured Outputs on the
+Responses API. The CLI sends a request only when you pass `--explain`. A
+configured API key alone leaves analysis local. [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+
+```bash
+pnpm coderipple impact ./repo --base main --head HEAD --explain --format markdown \
+  --explain-exclude 'internal/**'
+```
+
+The explanation contains a summary, possible impact to check, the static paths
+behind the affected symbols, and the report’s matching test recommendations.
+Citations give the actual file path, commit, and line range. The model
+prioritizes supplied paths and selects review concerns from a fixed list.
+CodeRipple renders relationships and recommendations from the canonical report
+and labels the model’s interpretation separately. Test execution and assertion
+coverage remain unknown. The model’s priorities may vary between runs.
+
+The provider receives a bounded projection of the report, including commit IDs,
+static relationships, opaque file and symbol IDs, source ranges, limitations,
+and snippets from the cited Git revisions. The snippets preserve syntax and
+replace identifiers with aliases. Comments, literal values, absolute paths,
+repository names, and raw diagnostics stay local. The sharing filter excludes
+hidden paths, non-JavaScript/TypeScript files, and common credential, key, and
+secret filenames or directories. Repeat `--explain-exclude` to exclude
+additional repository-relative paths with gitignore-style patterns. These
+exclusions also apply to paths or recommendations that pass through an
+excluded file. Repository content is untrusted, and the provider has no tools.
+The OpenAI adapter sends requests with `store: false`.
+[OpenAI Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create)
+
+With `--explain`, JSON output uses `{ report, explanation }`. The nested
+`report` is the canonical ImpactReport, and `explanation` has a status of
+`available` or `unavailable`. Text and Markdown append an explanation section.
+Missing configuration, excluded evidence, invalid responses, and provider
+errors or timeouts leave the report usable and the exit status at 0 when
+analysis succeeds. Without `--explain`, JSON emits the canonical report
+directly.
+
+Integrations can call `explainImpactReport(report, { enabled: true, provider,
+excludePaths })` using any `ExplanationProvider`. The provider receives the
+filtered `ExplanationContext` and an abort signal, and returns
+`{ focus: [{ pathId, concern }] }` using supplied IDs and the defined review
+concerns. Pass a commit-aware `readSource(sha, file)` when working with
+in-memory graphs or when source lives outside Git. Unit tests use mocked
+providers and mocked HTTP requests.

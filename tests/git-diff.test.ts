@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { ExplanationContext } from '../src/explanation/provider.js';
 import { InvalidRefError, NotAGitRepositoryError } from '../src/git/errors.js';
 import {
   GitCliDiffProvider,
@@ -34,7 +35,7 @@ function makeTempDir(prefix = 'coderipple-diff-'): string {
 }
 
 function git(cwd: string, args: readonly string[]): string {
-  return execFileSync('git', [...args], { cwd, encoding: 'utf8' });
+  return execFileSync('git', [...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 function configure(dir: string): void {
@@ -678,6 +679,7 @@ describeGit('resolveGitRoots path boundaries', () => {
 describeGit('local impact report', () => {
   it('connects changes, callers and suggested tests across revisions', async () => {
     const { analyzeImpact } = await import('../src/impact/impact-analysis.js');
+    const { explainImpactReport } = await import('../src/explanation/explain-impact.js');
     const dir = makeRepo();
     write(dir, 'src/service.ts', 'export function service() { return 1; }\n');
     write(dir, 'src/app.ts', "import { service } from './service';\nexport function app() { return service(); }\n");
@@ -690,5 +692,17 @@ describeGit('local impact report', () => {
     expect(report.affectedSymbols.some((x) => x.node.name === 'app')).toBe(true);
     expect(report.impactPaths.some((x) => x.edges.some((e) => e.type === 'CALLS'))).toBe(true);
     expect(report.testRecommendations.some((x) => x.testFile === 'tests/app.test.ts')).toBe(true);
+
+    write(dir, 'src/service.ts', "export function service() { throw new Error('uncommitted'); }\n");
+    const explain = vi.fn(async (context: ExplanationContext) => ({
+      focus: [{ pathId: context.paths.find(({ edges }) => edges.join() === 'CALLS,CALLS')?.id, concern: 'outputs' }],
+    }));
+    const result = await explainImpactReport(report, { enabled: true, provider: { explain } });
+    expect(result).toMatchObject({ status: 'available', explanation: {
+      evidence: expect.arrayContaining([expect.objectContaining({ revision: { side: 'head', sha: report.headSha }, filePath: 'src/service.ts', startLine: 1, endLine: 1 })]),
+    } });
+    const context = explain.mock.calls[0]?.[0];
+    expect(context?.evidence.some(({ snippet }) => snippet?.includes('return [redacted]'))).toBe(true);
+    expect(context?.evidence.some(({ snippet }) => snippet?.includes('throw'))).toBe(false);
   });
 });

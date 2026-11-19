@@ -129,6 +129,19 @@ export async function resolveGitRoots(repositoryPath: string): Promise<GitRoots>
   return { toplevel: toplevelReal, prefix: relative };
 }
 
+/** Read repository-relative source from a resolved commit instead of the working tree. */
+export async function createRevisionSourceReader(repositoryPath: string): Promise<(sha: string, file: string) => Promise<string>> {
+  const { toplevel, prefix } = await resolveGitRoots(repositoryPath);
+  return async (sha, file) => {
+    if (!isGitObjectId(sha)) throw new Error('Source retrieval requires a resolved Git object ID.');
+    return runGit(toplevel, ['cat-file', 'blob', `${sha}:${prefix ? `${prefix}/` : ''}${file}`]);
+  };
+}
+
+export function isGitObjectId(value: string): boolean {
+  return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+}
+
 /**
  * Resolve `ref` to an immutable commit object ID.
  *

@@ -94,3 +94,9 @@ export type { ImpactLevel, ImpactReport } from './impact/impact-report.js';
 
 export { retrieveEvidence, retrieveRevisionEvidence } from './retrieval/evidence.js';
 export type { EmbeddingProvider, RetrievalInput, RetrievalOptions, EvidenceItem, EvidencePackage } from './retrieval/evidence.js';
+
+export { explainImpactReport } from './explanation/explain-impact.js';
+export type { EvidenceReference, ExplanationOptions, ExplanationResult, ImpactExplanation } from './explanation/explain-impact.js';
+export type { ExplanationContext, ExplanationProvider, ImpactConcern } from './explanation/provider.js';
+export { createOpenAIExplanationProvider } from './explanation/openai-provider.js';
+export type { OpenAIExplanationConfig } from './explanation/openai-provider.js';
