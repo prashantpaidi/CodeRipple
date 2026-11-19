@@ -9,7 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "coderipple": "tsx src/cli/index.ts",
+    "coderipple": "node --import tsx src/cli/index.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",

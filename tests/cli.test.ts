@@ -1,35 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import path from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
-import { fixture, repoRoot } from './helpers.js';
-
-const CLI_PATH = path.join(repoRoot, 'src', 'cli', 'index.ts');
-
-interface CliRun {
-  status: number;
-  stdout: string;
-  stderr: string;
-}
-
-function runCli(args: readonly string[]): CliRun {
-  try {
-    const stdout = execFileSync(
-      process.execPath,
-      ['--import', 'tsx', CLI_PATH, ...args],
-      { cwd: repoRoot, encoding: 'utf8', timeout: 120_000 },
-    );
-    return { status: 0, stdout, stderr: '' };
-  } catch (error) {
-    const failure = error as { status?: number; stdout?: string; stderr?: string };
-    return {
-      status: failure.status ?? 1,
-      stdout: failure.stdout ?? '',
-      stderr: failure.stderr ?? '',
-    };
-  }
-}
+import { fixture, repoRoot, runCli } from './helpers.js';
 
 describe('CLI argument handling', () => {
   it('prints usage when no command is given', () => {
@@ -113,4 +84,16 @@ describe('CLI impact command', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Impact analysis failed');
   });
+  it('keeps the canonical JSON report and succeeds when an opted-in provider has no key', () => {
+    const args = ['impact', fixture('basic-project'), '--base', 'HEAD', '--head', 'HEAD', '--format', 'json'];
+    const env = { ...process.env, OPENAI_API_KEY: '', CODERIPPLE_OPENAI_MODEL: 'mock-model' };
+    const plain = runCli(args, env);
+    const optedIn = runCli([...args, '--explain', '--explain-exclude', 'private/'], env);
+    expect(plain.status).toBe(0);
+    expect(optedIn.status).toBe(0);
+    expect(JSON.parse(optedIn.stdout)).toEqual({
+      report: JSON.parse(plain.stdout),
+      explanation: { status: 'unavailable', reason: 'provider-not-configured' },
+    });
+  }, 120_000);
 });

@@ -7,7 +7,9 @@ import { errorMessage } from '../storage/errors.js';
 import { createNeo4jGraphStore } from '../storage/neo4j/neo4j-graph-store.js';
 import { loadEnvFileIfPresent } from '../storage/neo4j/neo4j-config.js';
 import { analyzeImpact } from '../impact/impact-analysis.js';
-import { formatImpactReport } from './impact.js';
+import { explainImpactReport } from '../explanation/explain-impact.js';
+import { createOpenAIExplanationProvider } from '../explanation/openai-provider.js';
+import { formatImpactReport, formatExplanation } from './impact.js';
 import { detectChangedSymbols } from '../impact/detect-changed-symbols.js';
 import { analyzeRepository, formatSummary } from './analyze.js';
 import { formatDiffReport, formatDiffReportJson } from './diff.js';
@@ -51,6 +53,8 @@ Impact options:
       --depth <n>           Maximum call hops (default: 3; zero allowed).
       --format <format>     text, markdown, or json (default: text).
       --limit <n>           Maximum items per human-readable section (default: 50).
+      --explain             Opt in to sending filtered evidence to OpenAI.
+      --explain-exclude <glob>  Exclude a source path from sharing (repeatable).
       --no-gitignore        Do not honor the repository root .gitignore.
 
 Diff options:
@@ -388,15 +392,27 @@ function parseDiffArgs(args: readonly string[]): DiffArgs {
   return { repository, base, head, json };
 }
 
-interface ImpactArgs { repository: string; base: string; head: string; depth: number; format: 'text' | 'markdown' | 'json'; limit: number; respectGitignore: boolean }
+interface ImpactArgs {
+  repository: string;
+  base: string;
+  head: string;
+  depth: number;
+  format: 'text' | 'markdown' | 'json';
+  limit: number;
+  respectGitignore: boolean;
+  explain: boolean;
+  excludePaths: string[];
+}
 
 function parseImpactArgs(args: readonly string[]): ImpactArgs {
   let repository: string | undefined, base: string | undefined, head: string | undefined;
   let depth = 3, limit = 50, respectGitignore = true;
+  let explain = false;
+  const excludePaths: string[] = [];
   let format: ImpactArgs['format'] = 'text';
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === '--base' || arg === '--head' || arg === '--depth' || arg === '--format' || arg === '--limit') {
+    if (arg === '--base' || arg === '--head' || arg === '--depth' || arg === '--format' || arg === '--limit' || arg === '--explain-exclude') {
       const value = nextValue(args, i, arg); i++;
       if (arg === '--base') base = value;
       else if (arg === '--head') head = value;
@@ -406,11 +422,15 @@ function parseImpactArgs(args: readonly string[]): ImpactArgs {
       } else if (arg === '--depth') {
         if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new UsageError(`Invalid --depth value: ${value}`);
         depth = Number(value);
+      } else if (arg === '--explain-exclude') {
+        if (!value.trim() || value.startsWith('!')) throw new UsageError('--explain-exclude requires a nonempty exclusion pattern');
+        excludePaths.push(value);
       } else {
         limit = parsePositiveInt(value, arg);
         if (!Number.isSafeInteger(limit)) throw new UsageError(`Invalid --limit value: ${value}`);
       }
-    } else if (arg === '--no-gitignore') respectGitignore = false;
+    } else if (arg === '--explain') explain = true;
+    else if (arg === '--no-gitignore') respectGitignore = false;
     else if (arg?.startsWith('-')) throw new UsageError(`Unknown option: ${arg}`);
     else if (repository === undefined) repository = arg;
     else throw new UsageError(`Unexpected argument: ${arg}`);
@@ -418,7 +438,7 @@ function parseImpactArgs(args: readonly string[]): ImpactArgs {
   if (!repository) throw new UsageError('Missing required <repository-path> argument');
   if (!base) throw new UsageError('Missing required --base <ref> option');
   if (!head) throw new UsageError('Missing required --head <ref> option');
-  return { repository, base, head, depth, format, limit, respectGitignore };
+  return { repository, base, head, depth, format, limit, respectGitignore, explain, excludePaths };
 }
 
 /* ------------------------------------------------------------------ *
@@ -620,7 +640,19 @@ async function runImpact(args: readonly string[]): Promise<number> {
   if (typeof parsed === 'number') return parsed;
   try {
     const report = await analyzeImpact(parsed.repository, { base: parsed.base, head: parsed.head, depth: parsed.depth, graphOptions: { respectGitignore: parsed.respectGitignore } });
-    process.stdout.write(parsed.format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : formatImpactReport(report, parsed.format, parsed.limit));
+    const apiKey = parsed.explain ? process.env.OPENAI_API_KEY?.trim() : undefined;
+    const model = parsed.explain ? process.env.CODERIPPLE_OPENAI_MODEL?.trim() : undefined;
+    const explanation = parsed.explain ? await explainImpactReport(report, {
+      enabled: true,
+      provider: apiKey && model ? createOpenAIExplanationProvider({ apiKey, model }) : undefined,
+      excludePaths: parsed.excludePaths,
+    }) : undefined;
+    if (parsed.format === 'json') {
+      process.stdout.write(`${JSON.stringify(explanation ? { report, explanation } : report, null, 2)}\n`);
+    } else {
+      process.stdout.write(formatImpactReport(report, parsed.format, parsed.limit));
+      if (explanation) process.stdout.write(formatExplanation(explanation, parsed.format, parsed.limit));
+    }
     return 0;
   } catch (error) {
     process.stderr.write(`Impact analysis failed: ${errorMessage(error)}\n`);
