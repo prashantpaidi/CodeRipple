@@ -9,8 +9,8 @@ with a graph, not a guess.
 
 > CodeRipple performs deterministic static analysis of JavaScript/TypeScript
 > repositories, answers dependency queries over graphs indexed in **Neo4j**,
-> and produces local impact reports from Git revisions. Impact reports can
-> include an opt-in, source-grounded explanation.
+> and produces impact reports from Git revisions locally and on GitHub pull
+> requests. Local reports can include an opt-in, source-grounded explanation.
 
 ## Purpose
 
@@ -438,7 +438,7 @@ Storage/query limitations:
 - ✅ Static blast-radius analysis and test recommendations.
 - ✅ Source-grounded retrieval with optional embeddings.
 - ✅ Opt-in LLM-assisted explanations.
-- **GitHub PR** analysis and change-impact reports.
+- ✅ GitHub PR analysis and change-impact reports.
 - Additional language analyzers.
 
 [ts-morph]: https://ts-morph.com/
@@ -477,6 +477,56 @@ as the rest of the analysis. Dynamic execution and coverage are not collected.
 Run `pnpm coderipple impact ./repo --base main --head HEAD --depth 3 --format markdown` to compare committed revisions without Neo4j. Formats are `text` (default), `markdown`, and `json`. `--depth` bounds call traversal (default 3, zero allowed); `--limit` bounds items per text or Markdown section (default 50). JSON is complete and uses the versioned ImpactReport schema. `--no-gitignore` disables root gitignore filtering. Exit status is 0 for a completed report regardless of risk, and 1 for invalid arguments or analysis errors.
 
 Risk is a deterministic heuristic, not a probability. HIGH means a deleted symbol, at least 10 detected dependent symbols, at least 10 affected files, or a potential API entry point. MEDIUM means detected dependents or potential importing modules, unresolved references, analysis limitations, or a change without a detected test. Otherwise risk is LOW. Indicators include call-path depth, affected files and modules, suggested tests, unresolved references and change types. Potential API entry points include source-backed NestJS handlers and are also inferred from `api`, `route(s)`, or `controller(s)` path segments and `handle`, `route`, or `controller` name prefixes; they are not verified exports or routes. Test suggestions and imports are static evidence, not proof of execution. Unresolved references and limitations describe uncertainty, and traversal depth may hide further impact. Deleted symbols use the base revision; additions and modifications use the head revision.
+
+### GitHub pull request impact reports
+
+The [CodeRipple PR impact workflow](.github/workflows/pr-impact.yml) runs on PR
+activity and publishes a Markdown job summary and a downloadable report in the
+workflow run’s **Artifacts** section. Set the repository Actions variable
+`CODERIPPLE_PR_COMMENT` to `true` to also maintain one bot comment per PR. The
+publisher updates its marked comment and skips identical report bodies.
+
+To reuse the workflow in another GitHub.com repository, add the following
+caller under `.github/workflows/` and replace `CODERIPPLE_COMMIT_SHA` with a full
+commit SHA containing this workflow. Set `comment: true` to enable the bot
+comment. The caller's permissions set the ceiling for the reusable workflow's
+jobs. Where an Actions event policy applies, it must allow `pull_request_target`
+for this caller. [Reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows) · [Pull request target security](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)
+
+```yaml
+name: CodeRipple PR impact
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+permissions: {}
+jobs:
+  impact:
+    uses: prashantpaidi/CodeRipple/.github/workflows/reusable-pr-impact.yml@CODERIPPLE_COMMIT_SHA
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      comment: false
+```
+
+The report identifies the event's base-branch tip, the merge base used for
+comparison, and the PR head SHA. Changes made only on the base branch are
+excluded. CodeRipple analyzes tracked TypeScript and JavaScript files with the
+default directory exclusions and a call depth of three. The report shows changed
+and affected symbols, impact paths, test suggestions, heuristic risk indicators,
+and analysis limitations. Large reports omit extra items with counts and shorten
+long entries to fit the 48 KiB limit.
+
+The analysis job uses a read-only contents token to fetch full history, then
+reads the PR commits in a network-disabled container. Dependency installation
+uses the pinned CodeRipple implementation and its lockfile. PR content is read
+as data, and the workflow uses no repository secrets or LLM keys. When enabled,
+the separate publisher receives only the bounded Markdown and uses a
+`pull-requests: write` token to manage the comment. It checks whether the PR is
+still open at the analyzed revisions before publishing. Missing revisions, a
+non-unique merge base, and analyzer failures mark the run as failed. For a failed
+run at the current revisions, the optional comment shows that analysis is
+unavailable.
 
 
 ### NestJS route evidence

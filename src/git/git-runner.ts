@@ -159,6 +159,7 @@ export async function resolveCommitId(
       'rev-parse',
       '--verify',
       '--quiet',
+      '--end-of-options',
       `${ref}^{commit}`,
     ]);
     return stripLineTerminator(output);

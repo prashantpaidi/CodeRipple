@@ -1,0 +1,16 @@
+name: CodeRipple PR impact
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions: {}
+
+jobs:
+  impact:
+    uses: ./.github/workflows/reusable-pr-impact.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      comment: ${{ vars.CODERIPPLE_PR_COMMENT == 'true' }}
