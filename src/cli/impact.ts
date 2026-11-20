@@ -2,13 +2,18 @@ import type { ImpactReport } from '../impact/impact-report.js';
 import type { ExplanationResult } from '../explanation/explain-impact.js';
 
 /** Limit display only; JSON always contains the complete report. */
-export function formatImpactReport(report: ImpactReport, format: 'text' | 'markdown', limit: number): string {
+export function formatImpactReport(
+  report: ImpactReport,
+  format: 'text' | 'markdown',
+  limit: number,
+  formatItem?: (item: string) => string,
+): string {
   const markdown = format === 'markdown';
   const rows = [markdown ? '# CodeRipple impact report' : 'CodeRipple impact report', '', `Base: ${report.baseSha}`, `Head: ${report.headSha}`, `Risk: ${report.risk.category} (heuristic, not a probability)`, ...report.risk.reasons.map((r) => `- ${r}`), '', `Dependents: ${report.risk.indicators.dependentCount}; depth: ${report.risk.indicators.minDepth ?? 'none'}–${report.risk.indicators.maxDepth ?? 'none'}; files: ${report.risk.indicators.affectedFiles}; potential modules: ${report.risk.indicators.affectedModules}; suggested tests: ${report.risk.indicators.affectedTests}; unresolved references: ${report.risk.indicators.unresolvedCount}`];
   const section = (title: string, items: string[]) => {
     rows.push('', markdown ? `## ${title}` : title);
-    rows.push(...(items.length ? items.slice(0, limit).map((x) => `- ${x}`) : ['- None detected.']));
-    if (items.length > limit) rows.push(`- ${items.length - limit} more omitted (use --limit to show more).`);
+    rows.push(...(items.length ? items.slice(0, limit).map((x) => `- ${formatItem?.(x) ?? x}`) : ['- None detected.']));
+    if (items.length > limit) rows.push(`- ${items.length - limit} more omitted${formatItem ? '' : ' (use --limit to show more)'}.`);
   };
   section('Changed symbols', report.changedSymbols.map((s) => `${s.changeType} ${s.nodeId} (${s.filePath})`));
   section('Affected dependents and files', [...report.affectedSymbols, ...report.affectedFiles].filter((x) => x.level !== 'directly-changed').map((x) => `${x.node.id}${x.node.type === 'METHOD' && x.node.route ? ` (NestJS ${x.node.route.method}, controller ${JSON.stringify(x.node.route.controllerPath)}, handler ${JSON.stringify(x.node.route.handlerPath)})` : ''} [${x.revision.side}; ${x.level}]`));

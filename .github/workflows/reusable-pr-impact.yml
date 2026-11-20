@@ -1,0 +1,154 @@
+name: Reusable CodeRipple PR impact
+
+on:
+  workflow_call:
+    inputs:
+      comment:
+        description: Update a sticky pull request comment in addition to the job summary.
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  analyze:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      report: ${{ steps.publish.outputs.report }}
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Check out the trusted CodeRipple implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: coderipple
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.0'
+          package-manager-cache: false
+
+      - name: Install trusted analyzer dependencies
+        working-directory: coderipple
+        run: |
+          npm install --global --ignore-scripts pnpm@12.14.0
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Fetch pull request history without a worktree checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ && "$PR_BASE_SHA" =~ ^[a-f0-9]{40}$ && "$PR_HEAD_SHA" =~ ^[a-f0-9]{40}$ ]]
+          target="$RUNNER_TEMP/coderipple-target"
+          git init --quiet --template= "$target"
+          git -C "$target" remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          # Overrides archive-only attributes from the snapshots so tracked source remains intact.
+          mkdir -p "$target/.git/info"
+          printf '* -export-ignore -export-subst\n' > "$target/.git/info/attributes"
+
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 --wrap=0)
+          printf '::add-mask::%s\n' "$auth"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" GIT_TERMINAL_PROMPT=0 \
+            git -C "$target" fetch --quiet --no-tags --no-recurse-submodules origin \
+              "$PR_BASE_SHA:refs/coderipple/base" "refs/pull/$PR_NUMBER/head:refs/coderipple/head"
+
+          if [[ "$(git -C "$target" rev-parse refs/coderipple/head)" != "$PR_HEAD_SHA" ]]; then
+            echo 'The fetched PR head changed since the event. Wait for the run for the current head.'
+            exit 1
+          fi
+
+      - name: Analyze PR commits in an offline container
+        shell: bash
+        run: |
+          report="$RUNNER_TEMP/coderipple-impact.md"
+          log="$RUNNER_TEMP/coderipple-analysis.log"
+          analyzer_image='node:24.22.0-bookworm@sha256:925de64a85319052d6971ae81ef2417da956e8a3a2c4a0fac732327970f017f5'
+          docker pull --quiet "$analyzer_image"
+          if ! docker run --rm --pull never --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user "$(id -u):$(id -g)" --env GIT_CONFIG_GLOBAL=/dev/null --env TSX_DISABLE_CACHE=1 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/coderipple,dst=/opt/coderipple,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/coderipple-target,dst=/target,readonly" \
+            --workdir /opt/coderipple \
+            "$analyzer_image" \
+            node --import tsx src/github/pr-report.ts /target "$PR_BASE_SHA" "$PR_HEAD_SHA" > "$report" 2> "$log"; then
+            stop_token=$(cat /proc/sys/kernel/random/uuid)
+            printf '::stop-commands::%s\n' "$stop_token"
+            tail -c 4096 "$log"
+            printf '\n::%s::\n' "$stop_token"
+            exit 1
+          fi
+          size=$(stat --format=%s "$report")
+          if [[ "$size" -lt 1 || "$size" -gt 49152 ]]; then
+            echo 'The Markdown report is empty or exceeds 48 KiB.'
+            exit 1
+          fi
+
+      - name: Upload the Markdown report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coderipple-impact-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coderipple-impact.md
+          if-no-files-found: error
+
+      - name: Publish the job summary
+        id: publish
+        shell: bash
+        env:
+          POST_COMMENT: ${{ inputs.comment }}
+        run: |
+          report="$RUNNER_TEMP/coderipple-impact.md"
+          if [[ "$POST_COMMENT" == 'true' ]]; then
+            printf 'report=%s\n' "$(base64 --wrap=0 "$report")" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize analysis failure
+        if: failure()
+        run: |
+          printf '# CodeRipple impact report unavailable\n\nThis run could not produce an impact report. See the failed analysis step for details.\n' >> "$GITHUB_STEP_SUMMARY"
+
+  comment:
+    if: ${{ !cancelled() && inputs.comment && github.event_name == 'pull_request_target' }}
+    needs: analyze
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: coderipple-pr-comment-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out only the trusted comment publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.0'
+          package-manager-cache: false
+
+      - name: Update the CodeRipple bot comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ANALYSIS_RESULT: ${{ needs.analyze.result }}
+          ENCODED_REPORT: ${{ needs.analyze.outputs.report }}
+        run: node src/github/pr-comment.ts
