@@ -9,6 +9,8 @@ import { loadEnvFileIfPresent } from '../storage/neo4j/neo4j-config.js';
 import { analyzeImpact } from '../impact/impact-analysis.js';
 import { explainImpactReport } from '../explanation/explain-impact.js';
 import { createOpenAIExplanationProvider } from '../explanation/openai-provider.js';
+import { resolveGitRoots } from '../git/git-runner.js';
+import { serveMcp } from '../mcp/stdio.js';
 import { formatImpactReport, formatExplanation } from './impact.js';
 import { detectChangedSymbols } from '../impact/detect-changed-symbols.js';
 import { analyzeRepository, formatSummary } from './analyze.js';
@@ -30,6 +32,7 @@ Usage:
   coderipple graph paths <repository-id> <from-node-id> <to-node-id> [options]
   coderipple diff <repository-path> --base <ref> --head <ref> [options]
   coderipple impact <repository-path> --base <ref> --head <ref> [options]
+  coderipple mcp <repository-path>
 
 Analyze options:
   -o, --output <file>   Write the code graph JSON to <file>.
@@ -704,6 +707,17 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === 'diff') {
     return runDiff(rest);
+  }
+  if (command === 'mcp') {
+    if (wantsHelp(rest)) { writeUsage(process.stdout); return 0; }
+    const [repository] = rest;
+    if (!repository || rest.length !== 1) {
+      writeUsage(process.stderr, 'Expected a single <repository-path>');
+      return 1;
+    }
+    const { toplevel, prefix } = await resolveGitRoots(repository);
+    await serveMcp(path.resolve(toplevel, prefix), process.stdin, process.stdout);
+    return 0;
   }
 
   writeUsage(process.stderr, `Unknown command: ${command}`);

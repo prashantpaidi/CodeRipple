@@ -45,8 +45,8 @@ interface, and the Neo4j implementation maps the graph to/from Neo4j internally
 so no driver objects ever leak into application code.
 
 Impact analysis uses in-memory revision graphs and changed-symbol detection to
-produce the canonical `ImpactReport`. The CLI can attach an optional explanation
-after the report is complete.
+produce the canonical `ImpactReport` for the CLI, MCP, and GitHub adapters. The
+CLI can attach an optional explanation after the report is complete.
 
 ## Repository
 
@@ -71,6 +71,8 @@ src/
     graph-schema.ts       # Zod schemas + structural validation
     graph-builder.ts      # orchestration, sorting, metadata
     ids.ts                # deterministic ID builders
+  mcp/
+    stdio.ts              # local MCP transport for the impact report
   storage/
     graph-store.ts        # GraphStore interface + query/result types
     repository-identity.ts# deterministic repository identity
@@ -373,14 +375,25 @@ pnpm test             # unit tests (no Docker)
 pnpm test:integration # real Neo4j via Testcontainers (requires Docker)
 pnpm typecheck        # tsc --noEmit, strict mode
 pnpm lint             # ESLint
+pnpm build            # compile production sources to dist/
 ```
 
-Unit tests run against real fixture repositories and exercise identity,
-configuration, mapping, and the batched persistence plan. Integration tests
-start a single Neo4j container and verify persistence, queries, re-indexing,
-explicit-ID reuse, repository isolation (including traversal against
-deliberately cross-repository relationships), and a generated 1,000-node /
-2,000+-edge scale sanity check. `pnpm test` never requires Docker.
+The Docker-free suite covers pure analysis, generated Git histories, CLI and
+MCP subprocesses, GitHub Markdown, and retrieval evaluation against committed
+fixtures. Integration tests start a shared Neo4j 5.26 Community container and
+verify persistence, queries, re-indexing, repository isolation, and scale.
+GitHub Actions runs both suites on every PR, audits locked dependencies for
+high and critical advisories, and scans the incoming commit range with
+Gitleaks. The integration job publishes the benchmark JSON as a run artifact.
+See the [benchmark report](benchmarks/README.md) for measurements and commands.
+
+CI uses Ubuntu 24.04, Node.js 24.22.0, and pnpm 12.14.0 with Git and GNU tar.
+Native Windows and environments without Git, tar, or working symlinks are
+outside the tested matrix. Revision analysis expects a Git work tree.
+Testcontainers requires access to Docker and its
+image registry. Integration and database benchmarks fail during setup when
+Docker is unavailable. The PR report workflow also requires complete base and
+head history to find the merge base.
 
 ## Supported languages
 
@@ -399,7 +412,7 @@ and `.git/`, honors the repository root `.gitignore`, and skips declaration
 Analyzer resolution (unchanged from the static-analysis phase) does **not**
 attempt to resolve:
 
-- dynamic `import()` (skipped entirely)
+- dynamic `import()` (recorded as `DYNAMIC_IMPORT`, with no import edge)
 - `eval()` and other runtime code generation
 - reflection / metaprogramming
 - runtime dependency injection and framework DI containers
@@ -413,9 +426,16 @@ attempt to resolve:
 Discovery-related limitations:
 
 - Only the repository-root `.gitignore` is honored; nested ones are ignored.
-- Only a root `tsconfig.json` is read; monorepos with multiple tsconfigs are not
-  yet supported.
+- Analysis uses one `tsconfig.json` at the selected root. To apply a package's
+  config in a monorepo, pass its directory as the repository path. Revision
+  analysis then compares that subtree and reports paths relative to it.
 - Default ignored directory names are skipped at **any** depth.
+- Discovery skips symlink entries, including symlinked root configuration
+  files. TypeScript's implicit config and module reads stay inside the selected
+  root. POSIX names containing a literal backslash are unsupported source paths.
+- When TypeScript recovers from invalid syntax, graph metadata includes
+  `syntaxDiagnostics` with the file, line, and compiler diagnostic code.
+  Impact and retrieval surface those diagnostics as limitations.
 
 Storage/query limitations:
 
@@ -436,6 +456,7 @@ Storage/query limitations:
 - ✅ Neo4j persistence and deterministic dependency queries.
 - ✅ Git diff → changed-symbol detection.
 - ✅ Static blast-radius analysis and test recommendations.
+- ✅ Local MCP impact reports over stdio.
 - ✅ Source-grounded retrieval with optional embeddings.
 - ✅ Opt-in LLM-assisted explanations.
 - ✅ GitHub PR analysis and change-impact reports.
@@ -477,6 +498,20 @@ as the rest of the analysis. Dynamic execution and coverage are not collected.
 Run `pnpm coderipple impact ./repo --base main --head HEAD --depth 3 --format markdown` to compare committed revisions without Neo4j. Formats are `text` (default), `markdown`, and `json`. `--depth` bounds call traversal (default 3, zero allowed); `--limit` bounds items per text or Markdown section (default 50). JSON is complete and uses the versioned ImpactReport schema. `--no-gitignore` disables root gitignore filtering. Exit status is 0 for a completed report regardless of risk, and 1 for invalid arguments or analysis errors.
 
 Risk is a deterministic heuristic, not a probability. HIGH means a deleted symbol, at least 10 detected dependent symbols, at least 10 affected files, or a potential API entry point. MEDIUM means detected dependents or potential importing modules, unresolved references, analysis limitations, or a change without a detected test. Otherwise risk is LOW. Indicators include call-path depth, affected files and modules, suggested tests, unresolved references and change types. Potential API entry points include source-backed NestJS handlers and are also inferred from `api`, `route(s)`, or `controller(s)` path segments and `handle`, `route`, or `controller` name prefixes; they are not verified exports or routes. Test suggestions and imports are static evidence, not proof of execution. Unresolved references and limitations describe uncertainty, and traversal depth may hide further impact. Deleted symbols use the base revision; additions and modifications use the head revision.
+
+### MCP impact reports
+
+After `pnpm build`, configure a local MCP client to launch the following command.
+
+```bash
+node /absolute/path/to/CodeRipple/dist/cli/index.js mcp /absolute/path/to/repository
+```
+
+The server implements [MCP stdio version 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
+Its `analyze_impact` tool takes `base`, `head`, and an optional integer `depth`
+from 0 to 10 (default 3). It returns the canonical `ImpactReport` as JSON text
+for the Git repository selected at startup. The tool runs locally without
+Neo4j or LLM credentials. Requests are limited to 64 KiB and reports to 4 MiB.
 
 ### GitHub pull request impact reports
 
@@ -554,8 +589,10 @@ for the request and ranked by cosine similarity alongside lexical matching and
 incoming call traversal. No embedding service or vector database is required.
 The retrieval API returns the structured package to the caller. `depth`,
 `maxResults`, `maxSnippetChars`, and
-`maxContextChars` bound retrieval, and limitations report missing source and
-truncation. Source readers supplied by integrations must honor the commit ID.
+`maxContextChars` bound retrieval. Missing source is reflected in limitations,
+and other available evidence remains eligible. When embeddings fail or return
+invalid vectors, retrieval retains lexical matches and graph relationships.
+Source readers supplied by integrations must honor the commit ID.
 
 ### Opt-in impact explanations
 

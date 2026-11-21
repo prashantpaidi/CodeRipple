@@ -28,6 +28,12 @@ export function toRelativePosix(from: string, absolute: string): string {
   return toPosixPath(path.relative(from, absolute));
 }
 
+/** True when the path is the root itself or a descendant. */
+export function isWithinPath(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
 /** True when the path has one of the supported source extensions. */
 export function hasSourceExtension(filePath: string): boolean {
   return SOURCE_EXTENSIONS.some((extension) => filePath.endsWith(extension));

@@ -36,7 +36,7 @@ export function loadRepositoryConfig(inputPath: string): RepositoryConfig {
   let tsconfigPath: string | null = null;
   for (const fileName of TSCONFIG_FILE_NAMES) {
     const candidate = path.join(absolute, fileName);
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+    if (fs.lstatSync(candidate, { throwIfNoEntry: false })?.isFile()) {
       tsconfigPath = candidate;
       break;
     }

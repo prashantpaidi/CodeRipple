@@ -35,7 +35,7 @@ export interface DiscoveryOptions {
  */
 export function loadGitignoreMatcher(rootDir: string): Ignore | null {
   const gitignorePath = path.join(rootDir, '.gitignore');
-  if (!fs.existsSync(gitignorePath) || !fs.statSync(gitignorePath).isFile()) {
+  if (!fs.lstatSync(gitignorePath, { throwIfNoEntry: false })?.isFile()) {
     return null;
   }
   const content = fs.readFileSync(gitignorePath, 'utf8');
@@ -67,6 +67,8 @@ export function discoverSourceFiles(
     const entries = fs.readdirSync(absoluteDir, { withFileTypes: true });
 
     for (const entry of entries) {
+      // TypeScript treats literal backslashes as path separators on every platform.
+      if (entry.name.includes('\\')) continue;
       const absoluteEntry = path.join(absoluteDir, entry.name);
       const relativeEntry = relativeDir
         ? `${relativeDir}/${entry.name}`

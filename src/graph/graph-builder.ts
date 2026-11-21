@@ -12,6 +12,7 @@ import {
   GRAPH_VERSION,
   type CodeGraph,
   type GraphEdge,
+  type GraphMetadata,
   type GraphNode,
   type UnresolvedReference,
 } from './graph-types.js';
@@ -98,7 +99,11 @@ export function buildGraph(
   }
 
   const unresolvedReferences: UnresolvedReference[] = [];
+  const syntaxDiagnostics: NonNullable<GraphMetadata['syntaxDiagnostics']> = [];
   for (const [relativePath, sourceFile] of entries) {
+    for (const diagnostic of parsed.project.getProgram().getSyntacticDiagnostics(sourceFile)) {
+      syntaxDiagnostics.push({ file: relativePath, line: diagnostic.getLineNumber(), code: diagnostic.getCode() });
+    }
     const { edges, unresolved } = resolveCalls(sourceFile, relativePath, {
       declarationToNodeId,
     });
@@ -111,6 +116,7 @@ export function buildGraph(
   const nodes = [...nodeById.values()].sort((a, b) => compareStrings(a.id, b.id));
   const edges = [...edgeByKey.values()].sort((a, b) => compareStrings(a.id, b.id));
   unresolvedReferences.sort(compareUnresolved);
+  syntaxDiagnostics.sort((a, b) => compareStrings(a.file, b.file) || a.line - b.line || a.code - b.code);
 
   return validateCodeGraph({
     version: nodes.some((node) => node.type === 'METHOD' && node.route !== undefined) ? '2' : GRAPH_VERSION,
@@ -125,6 +131,7 @@ export function buildGraph(
       methods: countNodes(nodes, 'METHOD'),
       resolvedCalls: countEdges(edges, 'CALLS'),
       unresolvedCalls: unresolvedReferences.length,
+      ...(syntaxDiagnostics.length > 0 && { syntaxDiagnostics }),
     },
   });
 }

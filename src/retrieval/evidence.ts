@@ -64,7 +64,9 @@ function cosine(a: readonly number[], b: readonly number[]): number {
   if (a.length !== b.length || a.length === 0 || !a.every(Number.isFinite) || !b.every(Number.isFinite)) throw new Error('Invalid embedding vectors');
   let dot = 0; let aa = 0; let bb = 0;
   for (let i = 0; i < a.length; i++) { const x = a[i] ?? 0; const y = b[i] ?? 0; dot += x * y; aa += x * x; bb += y * y; }
-  return aa && bb ? dot / Math.sqrt(aa * bb) : 0;
+  const score = aa && bb ? dot / Math.sqrt(aa * bb) : 0;
+  if (!Number.isFinite(score) || !Number.isFinite(aa * bb)) throw new Error('Invalid embedding magnitude');
+  return score;
 }
 
 /** Build a bounded, source-grounded package before passing context to any model. */
@@ -81,6 +83,11 @@ export async function retrieveEvidence(input: RetrievalInput, question: string, 
   const cache = new Map<string, Promise<string>>();
   const terms = words(question).filter((word) => !stop.has(word));
   for (const revision of revisions) {
+    for (const diagnostic of revision.graph.metadata.syntaxDiagnostics ?? []) {
+      limitations.add(`Incomplete syntax in ${revision.side} ${diagnostic.file}:${diagnostic.line} (TS${diagnostic.code}).`);
+    }
+    // Base evidence is reachable only through deleted-symbol seeds.
+    if (revision.side === 'base' && deleted.size === 0) continue;
     const files = new Map(revision.graph.nodes.filter((n) => n.type === 'FILE').map((n) => [n.id, n.path]));
     for (const node of [...revision.graph.nodes].sort((a, b) => compare(a.id, b.id))) {
       // Base candidates are rooted only at deleted symbols; their callers are added by traversal below.
@@ -89,7 +96,10 @@ export async function retrieveEvidence(input: RetrievalInput, question: string, 
       if (!path) { limitations.add(`Missing file for ${node.id} in ${revision.side} graph.`); continue; }
       const cacheKey = key(revision.sha, path);
       let source = cache.get(cacheKey);
-      if (!source) { source = input.readSource(revision.sha, path); cache.set(cacheKey, source); }
+      if (!source) {
+        source = Promise.resolve().then(() => input.readSource(revision.sha, path));
+        cache.set(cacheKey, source);
+      }
       let content: string;
       try { content = await source; } catch { limitations.add(`Source unavailable: ${revision.sha}:${path}`); continue; }
       const lines = content.split(/\r?\n/);
@@ -104,9 +114,17 @@ export async function retrieveEvidence(input: RetrievalInput, question: string, 
     }
   }
   if (options.embeddings && candidates.length) {
-    const vectors = await options.embeddings.embed([question, ...candidates.map((c) => c.text)]);
-    if (vectors.length !== candidates.length + 1 || !vectors[0]) throw new Error('Embedding provider returned the wrong number of vectors');
-    candidates.forEach((c, i) => { c.semantic = cosine(vectors[0] ?? [], vectors[i + 1] ?? []); });
+    try {
+      const vectors = await options.embeddings.embed([question, ...candidates.map((c) => c.text)]);
+      const questionVector = vectors[0];
+      if (vectors.length !== candidates.length + 1 || !questionVector) {
+        throw new Error('Embedding provider returned the wrong number of vectors');
+      }
+      const scores = candidates.map((_, i) => cosine(questionVector, vectors[i + 1] ?? []));
+      for (const [i, candidate] of candidates.entries()) candidate.semantic = scores[i] ?? 0;
+    } catch {
+      limitations.add('Semantic retrieval unavailable. Using lexical matches and graph relationships.');
+    }
   }
   const byKey = new Map(candidates.map((c) => [key(c.revision.side, c.node.id), c]));
   // Only deleted symbols may seed base searches. Graph traversal may then recover base callers.

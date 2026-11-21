@@ -314,12 +314,16 @@ export function parseGitDiff(
 
   const files = parseNameStatus(nameStatusOutput).map((change): ChangedFile => {
     const patch = patchByKey.get(rangeKey(change.oldPath, change.newPath));
+    // Git emits separate deletion and addition patches when the file type changes.
+    const samePath = change.changeType === 'MODIFIED' && change.oldPath === change.newPath;
+    const oldPatch = patch ?? (samePath ? patchByKey.get(rangeKey(change.oldPath, undefined)) : undefined);
+    const newPatch = patch ?? (samePath ? patchByKey.get(rangeKey(undefined, change.newPath)) : undefined);
     return {
       ...(change.oldPath === undefined ? {} : { oldPath: change.oldPath }),
       ...(change.newPath === undefined ? {} : { newPath: change.newPath }),
       changeType: change.changeType,
-      oldRanges: patch === undefined ? [] : dedupeSorted(patch.oldRanges),
-      newRanges: patch === undefined ? [] : dedupeSorted(patch.newRanges),
+      oldRanges: dedupeSorted(oldPatch?.oldRanges ?? []),
+      newRanges: dedupeSorted(newPatch?.newRanges ?? []),
     };
   });
 

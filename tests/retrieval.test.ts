@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { retrieveEvidence, type EmbeddingProvider, type RetrievalInput } from '../src/retrieval/evidence.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createRevisionSourceReader } from '../src/git/git-runner.js';
+import { retrieveEvidence, retrieveRevisionEvidence, type EmbeddingProvider, type RetrievalInput } from '../src/retrieval/evidence.js';
+import { analyzeFixture, withGitRepository } from './helpers.js';
 import { syntheticGraph } from './synthetic-graph.js';
 
 const repo = { id: 'repo-a', name: 'a', rootPath: '/a', source: 'override' as const };
@@ -10,10 +12,12 @@ const fake: EmbeddingProvider = { embed: async (texts) => texts.map((text) => te
 
 describe('source-grounded retrieval', () => {
   it('returns callers and resolved call edges with source evidence deterministically', async () => {
-    const result = await retrieveEvidence(input, 'What depends on validateUser?');
+    const readSource = vi.fn(input.readSource);
+    const result = await retrieveEvidence({ ...input, readSource }, 'What depends on validateUser?');
     expect(result.evidence.map((e) => e.node.name)).toEqual(expect.arrayContaining(['validateUser', 'register', 'handler']));
     expect(result.relationships.filter((r) => r.edge.type === 'CALLS')).toHaveLength(2);
     expect(result.evidence.every((e) => e.revision.sha === 'head' && e.snippet.includes('validateUser'))).toBe(true);
+    expect(readSource.mock.calls).toEqual([['head', 'src/graph-fixture.ts']]);
     expect(await retrieveEvidence(input, 'What depends on validateUser?')).toEqual(result);
   });
   it('retrieves deleted symbols and their callers only from base evidence', async () => {
@@ -49,4 +53,72 @@ describe('source-grounded retrieval', () => {
       expect(result.evidence.map((e) => e.node.name)).toEqual(expect.arrayContaining(label.expected));
     }
   });
+
+  it('keeps lexical results when an embedding batch fails or contains invalid vectors', async () => {
+    const plain = await retrieveEvidence(input, 'validateUser');
+    for (const embed of [
+      async () => { throw new Error('provider unavailable'); },
+      async (texts: readonly string[]) => texts.map((_, i) => i === 2 ? [NaN] : [1, 0]),
+    ]) {
+      const partial = await retrieveEvidence(input, 'validateUser', { embeddings: { embed } });
+      expect(partial.evidence).toEqual(plain.evidence);
+      expect(partial.relationships).toEqual(plain.relationships);
+      expect(partial.limitations).toContain('Semantic retrieval unavailable. Using lexical matches and graph relationships.');
+    }
+  });
+});
+
+describe('GraphRAG evaluation on committed source', () => {
+  const api = 'packages/api/service.ts::validate';
+  const handler = 'packages/api/handler.ts::handleRequest';
+  const test = 'packages/api/handler.test.ts::checkRequest';
+  const loader = 'packages/worker/load.ts::loadWorker';
+
+  it('checks ordered evidence IDs, graph expansion, semantic results and absent evidence', () => withGitRepository(async (repo) => {
+    const base = repo.commit('baseline');
+    repo.write('packages/api/service.ts', "export function validate() { return 'committed'; }\n");
+    const head = repo.commit('change api');
+    repo.write('packages/api/service.ts', "export function validate() { return 'uncommitted'; }\n");
+    const embeddings: EmbeddingProvider = {
+      embed: async ([question, ...texts]) => [[1, 0], ...texts.map((text) =>
+        question === 'background execution' && text.startsWith('loadWorker\n') ? [1, 0] : [0, 1])],
+    };
+    const labels = [
+      { question: 'Which callers depend on validate api?', ids: [api, handler, test], reasons: ['lexical', 'dependent', 'dependent'] },
+      { question: 'background execution', ids: [loader], reasons: ['semantic'] },
+      { question: 'unicorn compaction', ids: [], reasons: [] },
+    ];
+    for (const { question, ids, reasons } of labels) {
+      const result = await retrieveRevisionEvidence(repo.path, base, head, question, { embeddings, maxResults: 3 });
+      expect(result.evidence.map((item) => item.node.id)).toEqual(ids);
+      expect(result.evidence.flatMap((item) => item.reasons)).toEqual(reasons);
+      expect(result.evidence.every((item) => item.revision.sha === head)).toBe(true);
+      if (ids.includes(api)) {
+        expect(result.evidence[0]?.snippet).toContain("'committed'");
+        expect(result.relationships.map(({ edge }) => [edge.from, edge.to])).toEqual([[test, handler], [handler, api]]);
+      }
+      if (ids.includes(loader)) {
+        expect(result.unresolvedReferences).toEqual([expect.objectContaining({
+          reference: expect.objectContaining({ caller: loader, reason: 'DYNAMIC_IMPORT' }),
+        })]);
+      }
+    }
+  }, 'reliability-project'));
+
+  it('retains evidence from available files when a source reader throws synchronously', () => withGitRepository(async (repo) => {
+    const sha = repo.commit('baseline');
+    const readSource = await createRevisionSourceReader(repo.path);
+    const headGraph = analyzeFixture('reliability-project');
+    const missing = 'packages/api/handler.test.ts';
+    const result = await retrieveEvidence({
+      ...input, headSha: sha, headGraph,
+      readSource(sha, file) {
+        if (file === missing) throw new Error('missing file');
+        return readSource(sha, file);
+      },
+    }, 'validate api', { maxResults: 2 });
+    expect(result.evidence.map((item) => item.node.id)).toEqual([api, handler]);
+    expect(result.relationships.map(({ edge }) => [edge.from, edge.to])).toEqual([[handler, api]]);
+    expect(result.limitations).toContain(`Source unavailable: ${sha}:${missing}`);
+  }, 'reliability-project'));
 });

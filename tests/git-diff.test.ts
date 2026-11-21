@@ -12,8 +12,8 @@ import {
   restrictToPrefix,
   type GitDiffProvider,
 } from '../src/git/git-diff-provider.js';
-import { resolveGitRoots } from '../src/git/git-runner.js';
-import { resolveAnalyzableSubtree } from '../src/git/revision-graph.js';
+import { createRevisionSourceReader, resolveGitRoots } from '../src/git/git-runner.js';
+import { buildRevisionGraphs, resolveAnalyzableSubtree } from '../src/git/revision-graph.js';
 import type { ChangedFile } from '../src/git/types.js';
 import { detectChangedSymbols } from '../src/impact/detect-changed-symbols.js';
 
@@ -677,6 +677,27 @@ describeGit('resolveGitRoots path boundaries', () => {
 });
 
 describeGit('local impact report', () => {
+  it('maps a regular file replaced by a symlink as a deleted symbol in the base revision', async () => {
+    const dir = makeRepo();
+    const external = makeTempDir();
+    write(external, 'outside.ts', 'export function external() {}\n');
+    write(dir, 'changed.ts', 'export function removed() {}\n');
+    commit(dir, 'base', 'base');
+    fs.unlinkSync(path.join(dir, 'changed.ts'));
+    fs.symlinkSync(path.join(external, 'outside.ts'), path.join(dir, 'changed.ts'));
+    commit(dir, 'head', 'head');
+    const report = await detectChangedSymbols(dir, { base: 'base', head: 'head' });
+    expect(report.changedSymbols).toEqual([expect.objectContaining({
+      nodeId: 'changed.ts::removed', changeType: 'DELETED', changedRanges: [{ startLine: 1, endLine: 1 }],
+    })]);
+    const { headGraph } = await buildRevisionGraphs(dir, 'base', 'head');
+    expect(headGraph.nodes).toEqual([]);
+    const reader = await createRevisionSourceReader(dir);
+    const sha = git(dir, ['rev-parse', 'base']).trim();
+    await expect(reader(sha, '../outside.ts')).rejects.toThrow('repository-relative');
+    await expect(reader(sha, 'changed.ts')).resolves.toContain('removed');
+    await expect(buildRevisionGraphs(dir, '--help', 'head')).rejects.toBeInstanceOf(InvalidRefError);
+  });
   it('connects changes, callers and suggested tests across revisions', async () => {
     const { analyzeImpact } = await import('../src/impact/impact-analysis.js');
     const { explainImpactReport } = await import('../src/explanation/explain-impact.js');

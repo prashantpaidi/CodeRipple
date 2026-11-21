@@ -70,6 +70,7 @@ describe('GitHub PR impact report', () => {
     write('README.md', 'base\n');
     const baseTipSha = commit('base');
     write('Z #12 ` @octocat\n[link](https:example.test).ts', 'export function changed() {}\n');
+    write('broken.ts', 'export function pending() {\n  return unresolved(\n');
     fs.writeFileSync(path.join(directory, 'binary.dat'), Buffer.from([0, 1, 2]));
     const headSha = commit('head');
 
@@ -78,6 +79,7 @@ describe('GitHub PR impact report', () => {
     expect(markdown).toContain('- `` ADDED Z #12 ` @octocat\\u{a}[link](https:example.test).ts::changed');
     expect(markdown).not.toContain('\n[link]');
     expect(markdown).toContain('No changed symbol mapped for binary.dat');
+    expect(markdown).toContain('Incomplete syntax in head broken.ts:');
     expect(markdown).toContain('Risk: MEDIUM');
   });
 

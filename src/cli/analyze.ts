@@ -72,6 +72,10 @@ export function formatSummary(graph: CodeGraph, outputPath: string | null): stri
     line('Calls unresolved', metadata.unresolvedCalls),
   ];
 
+  if (metadata.syntaxDiagnostics?.length) {
+    rows.push(line('Syntax diagnostics', metadata.syntaxDiagnostics.length));
+  }
+
   if (outputPath) {
     rows.push('', 'Output:', outputPath);
   }

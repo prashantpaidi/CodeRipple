@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +11,7 @@ export const repoRoot = path.resolve(fileURLToPath(import.meta.url), '..', '..')
 
 export const fixturesDir = path.join(repoRoot, 'fixtures');
 
-export function runCli(args: readonly string[], env = process.env): { status: number; stdout: string; stderr: string } {
+export function runCli(args: readonly string[], env = process.env, input?: string): { status: number; stdout: string; stderr: string } {
   const cli = path.join(repoRoot, 'src', 'cli', 'index.ts');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coderipple-cli-test-'));
   const stdoutPath = path.join(directory, 'stdout');
@@ -21,8 +21,16 @@ export function runCli(args: readonly string[], env = process.env): { status: nu
     // Capture Node's output through regular files, including in restricted sandboxes.
     descriptors.push(fs.openSync(stdoutPath, 'w'));
     descriptors.push(fs.openSync(stderrPath, 'w'));
+    let stdin: number | 'ignore' = 'ignore';
+    if (input !== undefined) {
+      const inputPath = path.join(directory, 'stdin');
+      fs.writeFileSync(inputPath, input);
+      stdin = fs.openSync(inputPath, 'r');
+    }
+    const stdio = [stdin, ...descriptors];
+    if (stdin !== 'ignore') descriptors.push(stdin);
     const result = spawnSync(process.execPath, ['--import', 'tsx', cli, ...args], {
-      cwd: repoRoot, env, stdio: ['ignore', ...descriptors], timeout: 120_000,
+      cwd: repoRoot, env, stdio, timeout: 120_000,
     });
     if (result.error) throw result.error;
     return {
@@ -32,6 +40,48 @@ export function runCli(args: readonly string[], env = process.env): { status: nu
     };
   } finally {
     for (const descriptor of descriptors) fs.closeSync(descriptor);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+interface TestRepository {
+  path: string;
+  write: (file: string, text: string) => void;
+  commit: (message: string) => string;
+}
+
+/** Run a test with real Git commits independent of the checkout and user config. */
+export async function withGitRepository(test: (repository: TestRepository) => unknown, fixtureName?: string): Promise<void> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coderipple-test-repo-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', directory, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_AUTHOR_NAME: 'CodeRipple Test', GIT_AUTHOR_EMAIL: 'test@coderipple.dev',
+      GIT_AUTHOR_DATE: '2025-01-01T00:00:00Z',
+      GIT_COMMITTER_NAME: 'CodeRipple Test', GIT_COMMITTER_EMAIL: 'test@coderipple.dev',
+      GIT_COMMITTER_DATE: '2025-01-01T00:00:00Z',
+    },
+  }).trim();
+  try {
+    git('init', '-qb', 'main', '--template=');
+    if (fixtureName) fs.cpSync(fixture(fixtureName), directory, { recursive: true });
+    await test({
+      path: directory,
+      write(file, text) {
+        const target = path.join(directory, file);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, text);
+      },
+      commit(message) {
+        git('add', '-A');
+        git('commit', '-qm', message);
+        return git('rev-parse', 'HEAD');
+      },
+    });
+  } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }

@@ -1,6 +1,7 @@
 import { Project, ts, type SourceFile } from 'ts-morph';
 
 import type { RepositoryConfig } from '../config/repository-config.js';
+import { RepositoryFileSystem } from './repository-file-system.js';
 import type { DiscoveredFile } from './repository-parser.js';
 
 export interface ParsedRepository {
@@ -31,13 +32,16 @@ export function parseRepository(
     noEmit: true,
   } as const;
 
+  const fileSystem = new RepositoryFileSystem(config.rootDir);
   const project = config.tsconfigPath
     ? new Project({
+        fileSystem,
         tsConfigFilePath: config.tsconfigPath,
         skipAddingFilesFromTsConfig: true,
         compilerOptions: overrideOptions,
       })
     : new Project({
+        fileSystem,
         compilerOptions: {
           ...overrideOptions,
           target: ts.ScriptTarget.ESNext,

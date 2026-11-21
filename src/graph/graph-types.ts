@@ -23,6 +23,8 @@ export const UNRESOLVED_REASONS = [
   'TARGET_NOT_RESOLVED',
   /** The callee is a computed/dynamic member access (e.g. `obj[key]()`). */
   'DYNAMIC_PROPERTY_ACCESS',
+  /** A runtime import; its dependencies are outside the static edge model. */
+  'DYNAMIC_IMPORT',
   /** The callee resolves to a declaration outside the analyzed repository. */
   'EXTERNAL_DEPENDENCY',
   /** More than one in-repository declaration could be the target. */
@@ -89,6 +91,8 @@ export interface GraphMetadata {
   methods: number;
   resolvedCalls: number;
   unresolvedCalls: number;
+  /** Syntax errors in files recovered by the parser, when present. */
+  syntaxDiagnostics?: { file: string; line: number; code: number }[];
 }
 
 export interface CodeGraph {
