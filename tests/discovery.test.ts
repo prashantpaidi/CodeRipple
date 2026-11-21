@@ -1,8 +1,14 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
+import { buildGraph } from '../src/graph/graph-builder.js';
 import { loadRepositoryConfig } from '../src/config/repository-config.js';
+import { parseRepository } from '../src/parser/file-parser.js';
 import { discoverSourceFiles } from '../src/parser/repository-parser.js';
-import { fixture } from './helpers.js';
+import { fixture, withGitRepository } from './helpers.js';
 
 describe('repository file discovery', () => {
   it('discovers supported source files recursively', () => {
@@ -44,4 +50,31 @@ describe('repository file discovery', () => {
       /does not exist/,
     );
   });
+
+  it('keeps symlinked configuration and implicit TypeScript reads inside the selected root', () => withGitRepository((repo) => {
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'coderipple-outside-'));
+    try {
+      fs.writeFileSync(path.join(external, '.gitignore'), 'caller.ts\n');
+      fs.writeFileSync(path.join(external, 'tsconfig.json'), '{"compilerOptions":{"baseUrl":"."}}');
+      fs.writeFileSync(path.join(external, 'outside.ts'), 'export function external() { return 0; }\n');
+      for (const file of ['.gitignore', 'tsconfig.json', 'outside.ts']) {
+        fs.symlinkSync(path.join(external, file), path.join(repo.path, file));
+      }
+      repo.write('caller.ts', "import { external } from './outside.js';\nexport function caller() { return external(); }\n");
+      const initial = loadRepositoryConfig(repo.path);
+      expect(initial.tsconfigPath).toBeNull();
+      expect(discoverSourceFiles(initial).map((file) => file.relativePath)).toEqual(['caller.ts']);
+      fs.renameSync(path.join(repo.path, 'tsconfig.json'), path.join(repo.path, 'extended.json'));
+      repo.write('tsconfig.json', '{"extends":"./extended.json","compilerOptions":{"moduleResolution":"Bundler","module":"ESNext"}}');
+      const config = loadRepositoryConfig(repo.path);
+      const parsed = parseRepository(config, discoverSourceFiles(config));
+      const graph = buildGraph(config, parsed);
+      expect(parsed.project.getCompilerOptions().baseUrl).toBeUndefined();
+      expect(parsed.project.getSourceFiles().map((file) => file.getBaseName())).toEqual(['caller.ts']);
+      expect(graph.unresolvedReferences).toContainEqual(expect.objectContaining({ caller: 'caller.ts::caller' }));
+      expect(graph.edges.every((edge) => edge.type === 'CONTAINS')).toBe(true);
+    } finally {
+      fs.rmSync(external, { recursive: true, force: true });
+    }
+  }));
 });

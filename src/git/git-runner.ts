@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { toPosixPath } from '../utils/paths.js';
 import {
   GitCommandError,
   GitUnavailableError,
@@ -59,6 +58,7 @@ export async function runGit(
     const result = await execFileAsync('git', ['-C', repositoryPath, ...args], {
       encoding: 'utf8',
       maxBuffer: DEFAULT_MAX_BUFFER,
+      timeout: 120_000,
       windowsHide: true,
     });
     return String(result.stdout);
@@ -115,7 +115,7 @@ export async function resolveGitRoots(repositoryPath: string): Promise<GitRoots>
   }
 
   const toplevelReal = fs.realpathSync(toplevel);
-  const relative = toPosixPath(path.relative(toplevelReal, realRoot));
+  const relative = path.relative(toplevelReal, realRoot).split(path.sep).join('/');
   if (relative === '' || relative === '.') {
     return { toplevel: toplevelReal, prefix: '' };
   }
@@ -134,6 +134,9 @@ export async function createRevisionSourceReader(repositoryPath: string): Promis
   const { toplevel, prefix } = await resolveGitRoots(repositoryPath);
   return async (sha, file) => {
     if (!isGitObjectId(sha)) throw new Error('Source retrieval requires a resolved Git object ID.');
+    if (file.includes('\0') || file.split('/').some((part) => !part || part === '.' || part === '..')) {
+      throw new Error('Source retrieval requires a repository-relative file path.');
+    }
     return runGit(toplevel, ['cat-file', 'blob', `${sha}:${prefix ? `${prefix}/` : ''}${file}`]);
   };
 }

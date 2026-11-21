@@ -3,6 +3,7 @@ import type { CodeGraph, GraphEdge, GraphNode } from '../src/graph/graph-types.j
 import { analyzeImpactGraphs } from '../src/impact/impact-analysis.js';
 import { impactReportSchema } from '../src/impact/impact-report.js';
 import type { ChangedSymbol } from '../src/impact/types.js';
+import { generateFunctionNames, syntheticGraph } from './synthetic-graph.js';
 
 const repository = { id: 'repo-one', name: 'one', rootPath: '/one', source: 'path' as const };
 const file: GraphNode = { id: 'a.ts', type: 'FILE', name: 'a.ts', path: 'a.ts' };
@@ -48,6 +49,20 @@ describe('impact analysis', () => {
     const result = run({ headGraph: g });
     expect(result.affectedFiles).toContainEqual(expect.objectContaining({ node: expect.objectContaining({ id: 'b.ts' }), level: 'potential-module-impact' }));
     expect(result.unresolvedReferences).toHaveLength(1);
+  });
+  it('uses the depth bound on a long chain and never revisits the root on a cycle', () => {
+    const names = generateFunctionNames(600);
+    const chain = names.slice(1).map((name, i) => [name, `fn${i}`] as const);
+    const headGraph = syntheticGraph(names, [...chain, ['fn0', 'fn599']], { file: 'a.ts' });
+    const options = { headGraph, changedSymbols: [change('a.ts::fn0')] };
+    const bounded = run({ ...options, depth: 50 });
+    expect(bounded.affectedSymbols).toHaveLength(51);
+    expect(bounded.risk.indicators.maxDepth).toBe(50);
+
+    const all = run({ ...options, depth: 600 });
+    expect(all.affectedSymbols).toHaveLength(600);
+    expect(all.risk.indicators.maxDepth).toBe(599);
+    expect(all.impactPaths.find((item) => item.nodeIds[0] === 'a.ts::fn599')?.edges).toHaveLength(599);
   });
   it('reports unknown nodes and handles empty changes and repository isolation', () => {
     const unknown = run({ changedSymbols: [change('missing')] });

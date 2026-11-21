@@ -45,6 +45,11 @@ export function analyzeImpactGraphs(input: ImpactGraphInput): ImpactReport {
   const recommendations = new Map<string, ImpactReport['testRecommendations'][number]>();
   const withoutTests: ImpactReport['changesWithoutDetectedTests'] = [];
   const usedSides = new Set<'base' | 'head'>();
+  for (const [side, graph] of [['base', input.baseGraph], ['head', input.headGraph]] as const) {
+    for (const diagnostic of graph.metadata.syntaxDiagnostics ?? []) {
+      limitations.add(`Incomplete syntax in ${side} ${diagnostic.file}:${diagnostic.line} (TS${diagnostic.code}).`);
+    }
+  }
 
   for (const change of changed) {
     const side: 'base' | 'head' = change.changeType === 'DELETED' ? 'base' : 'head';

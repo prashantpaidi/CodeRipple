@@ -1,3 +1,4 @@
+import { isBuiltin } from 'node:module';
 import {
   Node,
   SyntaxKind,
@@ -68,19 +69,29 @@ function declarationsFor(symbol: Symbol, checker: TypeChecker): Node[] {
   return resolveAlias(symbol, checker).getDeclarations();
 }
 
+function importsBuiltin(symbol: Symbol): boolean {
+  return symbol.getDeclarations().some((declaration) => {
+    const specifier = declaration.getFirstAncestorByKind(SyntaxKind.ImportDeclaration)?.getModuleSpecifierValue();
+    return specifier !== undefined && isBuiltin(specifier);
+  });
+}
+
 /** Classify why a call could not be resolved into a concrete graph edge. */
 function classifyReason(
   expression: Node,
   symbol: Symbol | undefined,
   checker: TypeChecker,
 ): UnresolvedReason {
+  if (expression.getKind() === SyntaxKind.ImportKeyword) {
+    return 'DYNAMIC_IMPORT';
+  }
   if (Node.isElementAccessExpression(expression)) {
     return 'DYNAMIC_PROPERTY_ACCESS';
   }
 
   if (symbol) {
     const declarations = declarationsFor(symbol, checker);
-    if (declarations.length > 0 && declarations.every(isExternalDeclaration)) {
+    if (importsBuiltin(symbol) || (declarations.length > 0 && declarations.every(isExternalDeclaration))) {
       return 'EXTERNAL_DEPENDENCY';
     }
     return 'TARGET_NOT_RESOLVED';
@@ -90,7 +101,7 @@ function classifyReason(
     const objectSymbol = expression.getExpression().getSymbol();
     if (
       objectSymbol &&
-      declarationsFor(objectSymbol, checker).some(isExternalDeclaration)
+      (importsBuiltin(objectSymbol) || declarationsFor(objectSymbol, checker).some(isExternalDeclaration))
     ) {
       return 'EXTERNAL_DEPENDENCY';
     }
@@ -120,11 +131,6 @@ export function resolveCalls(
 
   for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expression = call.getExpression();
-
-    // Dynamic `import("...")` is explicitly out of scope for PR #1.
-    if (expression.getKind() === SyntaxKind.ImportKeyword) {
-      continue;
-    }
 
     // Module-level code has no function/method to attribute to, so the FILE
     // node becomes the caller. This keeps top-level calls (and their failures)

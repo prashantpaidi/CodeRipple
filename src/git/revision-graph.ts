@@ -7,10 +7,12 @@ import { promisify } from 'node:util';
 import { analyzeRepository } from '../cli/analyze.js';
 import type { DiscoveryOptions } from '../parser/repository-parser.js';
 import { GRAPH_VERSION, type CodeGraph } from '../graph/graph-types.js';
+import { isWithinPath } from '../utils/paths.js';
 import { GitUnavailableError, RevisionAnalysisError } from './errors.js';
 import {
   commandFailureDetail,
   isMissingExecutable,
+  resolveCommitId,
   resolveGitRoots,
   runGit,
 } from './git-runner.js';
@@ -47,6 +49,7 @@ async function extractArchive(archivePath: string, directory: string): Promise<v
     await execFileAsync('tar', ['-xf', archivePath, '-C', directory], {
       encoding: 'utf8',
       maxBuffer: MAX_BUFFER,
+      timeout: 120_000,
       windowsHide: true,
     });
   } catch (error) {
@@ -61,11 +64,6 @@ async function extractArchive(archivePath: string, directory: string): Promise<v
       { cause: error },
     );
   }
-}
-
-/** True when `candidate` is `root` itself or lies beneath it. */
-function isWithin(root: string, candidate: string): boolean {
-  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
 }
 
 /**
@@ -100,7 +98,7 @@ export function resolveAnalyzableSubtree(
   } catch {
     return undefined;
   }
-  if (!isWithin(realRoot, realCandidate)) {
+  if (!isWithinPath(realRoot, realCandidate)) {
     return undefined;
   }
   try {
@@ -113,14 +111,13 @@ export function resolveAnalyzableSubtree(
   return realCandidate;
 }
 
-async function analyzeRevision(
+async function materializeRevision(
   gitCwd: string,
   ref: string,
   workspace: string,
   label: 'base' | 'head',
   prefix: string,
-  options: DiscoveryOptions,
-): Promise<CodeGraph> {
+): Promise<string | undefined> {
   const directory = path.join(workspace, label);
   await fs.promises.mkdir(directory, { recursive: true });
 
@@ -128,7 +125,10 @@ async function analyzeRevision(
   await runGit(gitCwd, ['archive', '--format=tar', `--output=${archivePath}`, ref]);
   await extractArchive(archivePath, directory);
 
-  const target = resolveAnalyzableSubtree(directory, prefix);
+  return resolveAnalyzableSubtree(directory, prefix);
+}
+
+function analyzeRevision(target: string | undefined, label: string, ref: string, options: DiscoveryOptions): CodeGraph {
   if (target === undefined) {
     return emptyGraph();
   }
@@ -145,7 +145,7 @@ async function analyzeRevision(
 }
 
 /**
- * Build the base and head code graphs for a revision range.
+ * Materialize the base and head revisions for the duration of the callback.
  *
  * Each revision is materialized with `git archive` (run from the work-tree
  * root, so the whole tree is captured) into an isolated temporary directory and
@@ -154,20 +154,35 @@ async function analyzeRevision(
  * removed afterwards. When `repositoryPath` is a subdirectory of the work tree,
  * only that subtree is analyzed, so node paths match a direct `analyze` of it.
  */
+export async function withRevisionWorkspaces<T>(
+  repositoryPath: string,
+  baseRef: string,
+  headRef: string,
+  use: (paths: { base: string | undefined; head: string | undefined }) => T | Promise<T>,
+): Promise<T> {
+  const { toplevel, prefix } = await resolveGitRoots(repositoryPath);
+  const baseSha = await resolveCommitId(toplevel, baseRef, 'base');
+  const headSha = await resolveCommitId(toplevel, headRef, 'head');
+  const workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'coderipple-rev-'));
+
+  try {
+    const base = await materializeRevision(toplevel, baseSha, workspace, 'base', prefix);
+    const head = await materializeRevision(toplevel, headSha, workspace, 'head', prefix);
+    return await use({ base, head });
+  } finally {
+    await fs.promises.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/** Build the graphs from isolated snapshots of two immutable commits. */
 export async function buildRevisionGraphs(
   repositoryPath: string,
   baseRef: string,
   headRef: string,
   options: DiscoveryOptions = {},
 ): Promise<RevisionGraphs> {
-  const { toplevel, prefix } = await resolveGitRoots(repositoryPath);
-  const workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'coderipple-rev-'));
-
-  try {
-    const baseGraph = await analyzeRevision(toplevel, baseRef, workspace, 'base', prefix, options);
-    const headGraph = await analyzeRevision(toplevel, headRef, workspace, 'head', prefix, options);
-    return { baseGraph, headGraph };
-  } finally {
-    await fs.promises.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
-  }
+  return withRevisionWorkspaces(repositoryPath, baseRef, headRef, ({ base, head }) => ({
+    baseGraph: analyzeRevision(base, 'base', baseRef, options),
+    headGraph: analyzeRevision(head, 'head', headRef, options),
+  }));
 }

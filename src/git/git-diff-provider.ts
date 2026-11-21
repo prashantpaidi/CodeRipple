@@ -14,13 +14,11 @@ export interface GitDiffProvider {
 
 // `--no-color`/`--no-ext-diff`/`--no-textconv` keep the output machine-oriented;
 // the explicit prefixes make header parsing independent of the user's config.
-const COMMON_ARGS = ['--diff-filter=ADMRT', '-M'] as const;
+const COMMON_ARGS = ['--diff-filter=ADMRT', '-M', '--no-relative', '--no-ext-diff', '--no-textconv'] as const;
 const NAME_STATUS_ARGS = ['diff', '--name-status', '-z', ...COMMON_ARGS] as const;
 const PATCH_ARGS = [
   'diff',
   '--no-color',
-  '--no-ext-diff',
-  '--no-textconv',
   '--unified=0',
   '--src-prefix=a/',
   '--dst-prefix=b/',
@@ -129,26 +127,26 @@ export class GitCliDiffProvider implements GitDiffProvider {
     baseRef: string,
     headRef: string,
   ): Promise<ChangedFile[]> {
-    const prefix = (await resolveGitRoots(repositoryPath)).prefix;
-    await resolveCommitId(repositoryPath, baseRef, 'base');
-    await resolveCommitId(repositoryPath, headRef, 'head');
+    const { toplevel, prefix } = await resolveGitRoots(repositoryPath);
+    const baseSha = await resolveCommitId(toplevel, baseRef, 'base');
+    const headSha = await resolveCommitId(toplevel, headRef, 'head');
 
     // `core.quotePath=false` makes both invocations emit identical raw paths,
     // which is what lets the two outputs be joined by path.
-    const nameStatus = await runGit(repositoryPath, [
+    const nameStatus = await runGit(toplevel, [
       '-c',
       'core.quotePath=false',
       ...NAME_STATUS_ARGS,
-      baseRef,
-      headRef,
+      baseSha,
+      headSha,
       '--',
     ]);
-    const patch = await runGit(repositoryPath, [
+    const patch = await runGit(toplevel, [
       '-c',
       'core.quotePath=false',
       ...PATCH_ARGS,
-      baseRef,
-      headRef,
+      baseSha,
+      headSha,
       '--',
     ]);
 

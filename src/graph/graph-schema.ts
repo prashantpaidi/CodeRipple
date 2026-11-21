@@ -89,6 +89,11 @@ export const graphMetadataSchema = z
     methods: z.number().int().nonnegative(),
     resolvedCalls: z.number().int().nonnegative(),
     unresolvedCalls: z.number().int().nonnegative(),
+    syntaxDiagnostics: z.array(z.object({
+      file: nonEmptyString,
+      line: positiveLine,
+      code: z.number().int().positive(),
+    }).strict()).optional(),
   })
   .strict();
 
