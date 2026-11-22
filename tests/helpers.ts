@@ -13,16 +13,29 @@ export const fixturesDir = path.join(repoRoot, 'fixtures');
 
 export function runCli(args: readonly string[], env = process.env): { status: number; stdout: string; stderr: string } {
   const cli = path.join(repoRoot, 'src', 'cli', 'index.ts');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coderipple-cli-test-'));
+  return runCommand(process.execPath, ['--import', 'tsx', cli, ...args], repoRoot, env);
+}
+
+export function runCommand(command: string, args: readonly string[], cwd: string, env = process.env, input?: string) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'coderipple-command-test-'));
   const stdoutPath = path.join(directory, 'stdout');
   const stderrPath = path.join(directory, 'stderr');
   const descriptors: number[] = [];
   try {
-    // Capture Node's output through regular files, including in restricted sandboxes.
-    descriptors.push(fs.openSync(stdoutPath, 'w'));
-    descriptors.push(fs.openSync(stderrPath, 'w'));
-    const result = spawnSync(process.execPath, ['--import', 'tsx', cli, ...args], {
-      cwd: repoRoot, env, stdio: ['ignore', ...descriptors], timeout: 120_000,
+    // Use regular files for subprocess streams, including in restricted sandboxes.
+    let stdin: number | 'ignore' = 'ignore';
+    if (input !== undefined) {
+      const stdinPath = path.join(directory, 'stdin');
+      fs.writeFileSync(stdinPath, input);
+      stdin = fs.openSync(stdinPath, 'r');
+      descriptors.push(stdin);
+    }
+    const stdout = fs.openSync(stdoutPath, 'w');
+    descriptors.push(stdout);
+    const stderr = fs.openSync(stderrPath, 'w');
+    descriptors.push(stderr);
+    const result = spawnSync(command, args, {
+      cwd, env, stdio: [stdin, stdout, stderr], timeout: 120_000,
     });
     if (result.error) throw result.error;
     return {
