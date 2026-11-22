@@ -1,14 +1,17 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 
 import { EDGE_TYPES, type EdgeType } from '../graph/graph-types.js';
 import { errorMessage } from '../storage/errors.js';
+import { resolveGitRoots } from '../git/git-runner.js';
 import { createNeo4jGraphStore } from '../storage/neo4j/neo4j-graph-store.js';
 import { loadEnvFileIfPresent } from '../storage/neo4j/neo4j-config.js';
 import { analyzeImpact } from '../impact/impact-analysis.js';
 import { explainImpactReport } from '../explanation/explain-impact.js';
 import { createOpenAIExplanationProvider } from '../explanation/openai-provider.js';
+import { serveMcp } from '../mcp/stdio.js';
 import { formatImpactReport, formatExplanation } from './impact.js';
 import { detectChangedSymbols } from '../impact/detect-changed-symbols.js';
 import { analyzeRepository, formatSummary } from './analyze.js';
@@ -30,6 +33,7 @@ Usage:
   coderipple graph paths <repository-id> <from-node-id> <to-node-id> [options]
   coderipple diff <repository-path> --base <ref> --head <ref> [options]
   coderipple impact <repository-path> --base <ref> --head <ref> [options]
+  coderipple mcp <repository-path>
 
 Analyze options:
   -o, --output <file>   Write the code graph JSON to <file>.
@@ -63,6 +67,7 @@ Diff options:
       --json                Emit deterministic JSON instead of text.
 
   -h, --help            Show this help.
+  -v, --version         Show the installed CodeRipple version.
 
 Examples:
   coderipple analyze ./fixtures/basic-project
@@ -73,6 +78,7 @@ Examples:
 
 class UsageError extends Error {}
 
+const { version } = createRequire(import.meta.url)('../../package.json') as { version: string };
 const EDGE_TYPE_SET = new Set<string>(EDGE_TYPES);
 
 function isEdgeType(value: string): value is EdgeType {
@@ -682,12 +688,33 @@ async function runGraph(args: readonly string[]): Promise<number> {
   return 1;
 }
 
+async function runMcp(args: readonly string[]): Promise<number> {
+  if (wantsHelp(args)) {
+    writeUsage(process.stdout);
+    return 0;
+  }
+  const [repository] = args;
+  if (!repository || repository.startsWith('-') || args.length !== 1) {
+    writeUsage(process.stderr, 'Expected a single <repository-path>');
+    return 1;
+  }
+
+  const { toplevel, prefix } = await resolveGitRoots(repository);
+  await serveMcp(path.resolve(toplevel, prefix), process.stdin, process.stdout, version);
+  return 0;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
 
   if (command === undefined || command === '--help' || command === '-h' || command === 'help') {
     writeUsage(process.stdout);
     return command === undefined ? 1 : 0;
+  }
+
+  if (argv.length === 1 && (command === '--version' || command === '-v')) {
+    process.stdout.write(`${version}\n`);
+    return 0;
   }
 
   if (command === 'analyze') {
@@ -704,6 +731,9 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (command === 'diff') {
     return runDiff(rest);
+  }
+  if (command === 'mcp') {
+    return runMcp(rest);
   }
 
   writeUsage(process.stderr, `Unknown command: ${command}`);
